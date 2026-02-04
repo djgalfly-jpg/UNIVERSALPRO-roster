@@ -1,22 +1,31 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Artist, WallItem } from '../types';
-import { getArtists, saveArtist, addToWall, convertDropboxLink, getVisualEffects, saveVisualEffects } from '../services/store';
+import { Artist, WallItem, ArtistStatus } from '../types';
+import { getArtists, saveArtist, addToWall, convertDropboxLink, getVisualEffects, saveVisualEffects, deleteArtist, getWallItems, deleteWallItem, checkDbConnection } from '../services/store';
 import { searchArtistBio, editArtistImage } from '../services/geminiService';
 import { Link } from 'react-router-dom';
-import { Camera, Wand2, Search, Link as LinkIcon, Upload, Music, Loader2, Sparkles, LayoutGrid, Image as ImageIcon, CheckCircle, BarChart3, Youtube, Instagram, Twitter, Copy, Check, Eye, Globe, Images, Monitor, Type, Save, Disc, FileText } from 'lucide-react';
+import { Camera, Wand2, Search, Link as LinkIcon, Upload, Music, Loader2, Sparkles, LayoutGrid, Image as ImageIcon, CheckCircle, BarChart3, Youtube, Instagram, Twitter, Copy, Check, Eye, Globe, Images, Monitor, Type, Save, Disc, FileText, Lock, AlertTriangle, Trash2, Settings, Power, RefreshCw, XCircle, AlertOctagon, Edit3, ArrowLeft, Database, Pencil } from 'lucide-react';
 import ArtistLandingPage from './ArtistLandingPage';
 
 const AdminDashboard: React.FC = () => {
-  const [activeTab, setActiveTab] = useState<'create' | 'wall' | 'animations'>('create');
-  const [artists, setArtists] = useState<Artist[]>(getArtists());
+  // Authentication State
+  const [isAuthenticated, setIsAuthenticated] = useState(false);
+  const [passwordInput, setPasswordInput] = useState('');
+  const [authError, setAuthError] = useState(false);
+
+  const [activeTab, setActiveTab] = useState<'create' | 'wall' | 'animations' | 'sites'>('create');
+  const [artists, setArtists] = useState<Artist[]>([]);
+  
+  // Database Status
+  const [dbStatus, setDbStatus] = useState<'checking' | 'connected' | 'error'>('checking');
   
   // FX State
-  const [currentEffects, setCurrentEffects] = useState(getVisualEffects());
-  const [targetFx, setTargetFx] = useState<'title' | 'wall'>('title'); // Which one are we editing?
-  const [tempTitleFx, setTempTitleFx] = useState(currentEffects.title);
-  const [tempWallFx, setTempWallFx] = useState(currentEffects.wall);
+  const [currentEffects, setCurrentEffects] = useState({ title: '', wall: '' });
+  const [targetFx, setTargetFx] = useState<'title' | 'wall'>('title'); 
+  const [tempTitleFx, setTempTitleFx] = useState('');
+  const [tempWallFx, setTempWallFx] = useState('');
   
   // Artist Form State
+  const [editingArtistId, setEditingArtistId] = useState<string | null>(null);
   const [name, setName] = useState('');
   const [bio, setBio] = useState('');
   const [photoUrl, setPhotoUrl] = useState('https://picsum.photos/800/800');
@@ -43,6 +52,7 @@ const AdminDashboard: React.FC = () => {
   const [wallTitle, setWallTitle] = useState('');
   const [wallSubtitle, setWallSubtitle] = useState('');
   const [dropboxLink, setDropboxLink] = useState('');
+  const [existingWallItems, setExistingWallItems] = useState<WallItem[]>([]);
   
   // AI States
   const [isGeneratingBio, setIsGeneratingBio] = useState(false);
@@ -51,6 +61,46 @@ const AdminDashboard: React.FC = () => {
   const [imageFile, setImageFile] = useState<File | null>(null);
 
   const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Load Data
+  useEffect(() => {
+      if (isAuthenticated) {
+          loadData();
+          verifyDb();
+      }
+  }, [isAuthenticated, activeTab]);
+
+  const verifyDb = async () => {
+      setDbStatus('checking');
+      const isConnected = await checkDbConnection();
+      setDbStatus(isConnected ? 'connected' : 'error');
+  }
+
+  const loadData = async () => {
+      const fetchedArtists = await getArtists();
+      setArtists(fetchedArtists);
+
+      const effects = await getVisualEffects();
+      setCurrentEffects(effects);
+      if (!tempTitleFx) setTempTitleFx(effects.title);
+      if (!tempWallFx) setTempWallFx(effects.wall);
+
+      if (activeTab === 'wall') {
+          const wItems = await getWallItems();
+          setExistingWallItems(wItems);
+      }
+  };
+
+  const handleLogin = (e: React.FormEvent) => {
+      e.preventDefault();
+      if (passwordInput === '8069987Pt') {
+          setIsAuthenticated(true);
+          setAuthError(false);
+      } else {
+          setAuthError(true);
+          setPasswordInput('');
+      }
+  }
 
   const handleSearchBio = async () => {
     if (!name) return alert("Enter artist name first");
@@ -73,7 +123,6 @@ const AdminDashboard: React.FC = () => {
   };
 
   const handleDropboxImageForArtist = (val: string) => {
-      // Allow artists to also use dropbox links
       const converted = convertDropboxLink(val);
       setPhotoUrl(converted);
   };
@@ -94,33 +143,24 @@ const AdminDashboard: React.FC = () => {
     }
   };
 
-  // Helper to extract Spotify ID from full URL
   const handleSpotifyUrlChange = (val: string) => {
       let extractedId = val.trim();
-      
       try {
-          // Handle standard URL: https://open.spotify.com/artist/7ltDVBr6mKbRvohxheJ9h1?si=...
-          // Also handles international URLs like https://open.spotify.com/intl-es/artist/...
           if (extractedId.includes('/artist/')) {
               const parts = extractedId.split('/artist/');
               if (parts.length > 1) {
-                  // Take everything after /artist/ and split by ? (query params) or / (trailing slash or subpaths)
                   extractedId = parts[1].split(/[?\/]/)[0];
               }
           }
-          // Handle URI: spotify:artist:7ltDVBr6mKbRvohxheJ9h1
           else if (extractedId.includes('spotify:artist:')) {
               extractedId = extractedId.split(':')[2];
           }
       } catch (e) {
           console.error("Error parsing Spotify URL", e);
-          // Fallback: If parsing fails, leave it as is, though it likely won't work in iframe if it's a full URL
       }
-      
       setSpotifyId(extractedId);
   }
 
-  // Helper to generate friendly slug
   const generateSlug = (artistName: string) => {
       return artistName
         .toLowerCase()
@@ -130,20 +170,40 @@ const AdminDashboard: React.FC = () => {
         .replace(/^-+|-+$/g, '');
   };
 
+  const handleEditArtist = (artist: Artist) => {
+      setEditingArtistId(artist.id);
+      setName(artist.name);
+      setBio(artist.bio);
+      setPhotoUrl(artist.photoUrl);
+      setGenre(artist.genre);
+      setYtId(artist.youtubeVideoId);
+      setSpotifyId(artist.spotifyArtistId);
+      setBookUrl(artist.bookUrl || '');
+      setGalleryInput(artist.galleryUrls ? artist.galleryUrls.join('\n') : '');
+      setSpotifyListeners(artist.stats.spotifyListeners.toString());
+      setYoutubeSubs(artist.stats.youtubeSubscribers.toString());
+      setInstaFollowers(artist.stats.instagramFollowers.toString());
+      setTiktokFollowers(artist.stats.tiktokFollowers.toString());
+      
+      setActiveTab('create');
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+  };
+
   const handlePreviewArtist = () => {
       if (!name) return alert("Artist Name is required");
       
-      const newId = Date.now().toString();
+      const newId = editingArtistId || Date.now().toString();
       const slug = generateSlug(name);
       
-      // Parse Gallery Input
       const galleryUrls = galleryInput
         .split('\n')
         .map(url => url.trim())
         .filter(url => url.length > 0)
         .map(url => convertDropboxLink(url));
 
-      // Temporary object for preview
+      // If editing, find original to preserve some fields
+      const originalArtist = editingArtistId ? artists.find(a => a.id === editingArtistId) : null;
+
       const tempArtist: Artist = {
           id: newId,
           slug: slug,
@@ -154,42 +214,49 @@ const AdminDashboard: React.FC = () => {
           youtubeVideoId: ytId,
           spotifyArtistId: spotifyId,
           bookUrl: bookUrl,
-          isPublic: false,
+          isPublic: originalArtist ? originalArtist.isPublic : false,
           generatedLink: `${window.location.origin}${window.location.pathname}#/artist/${slug}`,
           galleryUrls: galleryUrls,
-          visitCount: 0,
-          visitorCountries: [],
+          visitCount: originalArtist ? originalArtist.visitCount : 0,
+          visitorCountries: originalArtist ? originalArtist.visitorCountries : [],
+          status: originalArtist ? originalArtist.status : 'active',
           stats: {
             spotifyListeners: parseInt(spotifyListeners) || 0,
             youtubeSubscribers: parseInt(youtubeSubs) || 0,
             instagramFollowers: parseInt(instaFollowers) || 0,
             tiktokFollowers: parseInt(tiktokFollowers) || 0
           },
-          topSongs: []
+          topSongs: originalArtist ? originalArtist.topSongs : []
       };
 
       setPreviewArtist(tempArtist);
   };
 
-  const handleFinalPublish = () => {
+  const handleFinalPublish = async () => {
     if (!previewArtist) return;
 
-    // Save to store
-    saveArtist({...previewArtist, isPublic: true});
-    setArtists(getArtists());
+    await saveArtist({...previewArtist, isPublic: true});
+    const updatedArtists = await getArtists();
+    setArtists(updatedArtists);
     
-    // Add to Wall
-    addToWall({
-        id: `wall-${previewArtist.id}`,
-        type: 'artist',
-        title: previewArtist.name,
-        subtitle: previewArtist.genre || 'New Signing',
-        imageUrl: previewArtist.photoUrl
-    });
+    // Only add to wall if it's a new artist
+    if (!editingArtistId) {
+        await addToWall({
+            id: `wall-${previewArtist.id}`,
+            type: 'artist',
+            title: previewArtist.name,
+            subtitle: previewArtist.genre || 'New Signing',
+            imageUrl: previewArtist.photoUrl
+        });
+    }
 
-    // Show Success & Link
     setGeneratedPublicLink(previewArtist.generatedLink || '');
-    setPreviewArtist(null); // Exit preview mode
+    setPreviewArtist(null); 
+    if (editingArtistId) {
+        setEditingArtistId(null);
+        alert('Artist Profile Updated Successfully');
+        setActiveTab('sites');
+    }
     window.scrollTo({ top: 0, behavior: 'smooth' });
   };
 
@@ -206,6 +273,7 @@ const AdminDashboard: React.FC = () => {
   }
 
   const resetForm = () => {
+      setEditingArtistId(null);
       setName('');
       setBio('');
       setGenre('');
@@ -222,23 +290,47 @@ const AdminDashboard: React.FC = () => {
       setPreviewArtist(null);
   }
 
-  const handleAddToWall = () => {
+  const handleAddToWall = async () => {
       if (!dropboxLink) return alert("Please provide a Dropbox link");
-      
       const imageUrl = convertDropboxLink(dropboxLink);
-      
-      addToWall({
+      await addToWall({
           id: `wall-drop-${Date.now()}`,
-          type: 'single', // Generic type for wall upload
+          type: 'single', 
           title: wallTitle || 'Exclusive',
           subtitle: wallSubtitle || 'Universal Orchard',
           imageUrl: imageUrl
       });
-      
       setWallTitle('');
       setWallSubtitle('');
       setDropboxLink('');
+      // Refresh list
+      const items = await getWallItems();
+      setExistingWallItems(items);
       alert("Photo added to the Wall successfully!");
+  }
+
+  const handleDeleteWallItem = async (id: string) => {
+      if(window.confirm('Remove this photo from the public wall?')) {
+          await deleteWallItem(id);
+          const items = await getWallItems();
+          setExistingWallItems(items);
+      }
+  }
+
+  // Site Management Functions
+  const handleDeleteArtist = async (id: string) => {
+      if(window.confirm('Are you sure you want to delete this artist page? This cannot be undone.')) {
+          await deleteArtist(id);
+          const updated = await getArtists();
+          setArtists(updated);
+      }
+  }
+
+  const handleUpdateStatus = async (artist: Artist, newStatus: ArtistStatus) => {
+      const updatedArtist = { ...artist, status: newStatus };
+      await saveArtist(updatedArtist);
+      const updated = await getArtists();
+      setArtists(updated);
   }
 
   // FX Management
@@ -250,10 +342,54 @@ const AdminDashboard: React.FC = () => {
       }
   }
 
-  const applyEffects = () => {
-      saveVisualEffects(tempTitleFx, tempWallFx);
+  const applyEffects = async () => {
+      await saveVisualEffects(tempTitleFx, tempWallFx);
       setCurrentEffects({ title: tempTitleFx, wall: tempWallFx });
       alert("Visual Effects Applied to Public Wall");
+  }
+
+  // Login Screen
+  if (!isAuthenticated) {
+      return (
+          <div className="min-h-screen bg-black flex flex-col items-center justify-center p-8 relative overflow-hidden">
+              <div className="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1516280440614-6697288d5d38?q=80&w=2070&auto=format&fit=crop')] bg-cover bg-center opacity-20 blur-sm"></div>
+              
+              <div className="z-10 bg-black/80 backdrop-blur-md border border-white/20 p-8 md:p-12 max-w-md w-full text-center space-y-6 shadow-2xl">
+                  <div className="mb-4">
+                      <h1 className="text-3xl font-display font-bold text-white mb-2">UNIVERSAL <br/> ORCHARD</h1>
+                      <p className="text-[10px] uppercase tracking-[0.3em] text-gray-500">Security Gateway</p>
+                  </div>
+                  
+                  <form onSubmit={handleLogin} className="space-y-4">
+                      <div className="space-y-2">
+                          <label className="text-[10px] uppercase tracking-widest text-gray-500 block text-left">Access Key</label>
+                          <div className="relative">
+                            <input 
+                                type="password" 
+                                value={passwordInput}
+                                onChange={(e) => setPasswordInput(e.target.value)}
+                                className={`w-full bg-black border p-4 text-center text-white tracking-[0.5em] outline-none focus:border-white transition-colors ${authError ? 'border-red-500 animate-shake' : 'border-white/20'}`}
+                                placeholder="••••••••"
+                            />
+                            <Lock className="absolute right-4 top-4 text-gray-600" size={16}/>
+                          </div>
+                      </div>
+                      
+                      {authError && <p className="text-red-500 text-xs uppercase tracking-widest">Access Denied</p>}
+                      
+                      <button type="submit" className="w-full bg-white text-black font-bold uppercase tracking-widest py-4 hover:bg-gray-200 transition text-xs">
+                          Authenticate
+                      </button>
+                  </form>
+
+                  <div className="border-t border-white/10 pt-4">
+                      <Link to="/" className="text-gray-500 hover:text-white text-xs uppercase tracking-widest flex items-center justify-center gap-2 transition">
+                          <ArrowLeft size={12} /> Return to Public Site
+                      </Link>
+                  </div>
+              </div>
+          </div>
+      )
   }
 
   const FX_LIST = [
@@ -274,7 +410,6 @@ const AdminDashboard: React.FC = () => {
       { id: 'anim-sepia', name: 'Sepia Old' },
       { id: 'anim-ghost', name: 'Ghosting' },
       { id: 'anim-jiggle', name: 'Jiggle' },
-      
       // New Title Effects
       { id: 'anim-title-cinema', name: 'Title: Cinema' },
       { id: 'anim-title-shudder', name: 'Title: Shudder' },
@@ -286,7 +421,6 @@ const AdminDashboard: React.FC = () => {
       { id: 'anim-title-elevator', name: 'Title: Elevator' },
       { id: 'anim-title-color-cycle', name: 'Title: Colors' },
       { id: 'anim-title-mask-reveal', name: 'Title: Reveal' },
-
       // New Wall Effects
       { id: 'anim-wall-breathing', name: 'Wall: Breathing' },
       { id: 'anim-wall-kenburns', name: 'Wall: Ken Burns' },
@@ -336,13 +470,12 @@ const AdminDashboard: React.FC = () => {
                           onClick={handleFinalPublish} 
                           className="px-8 py-3 bg-black text-white hover:bg-gray-800 uppercase tracking-widest text-xs font-bold flex items-center gap-2 transition"
                       >
-                          <Globe size={14}/> Publish Web Page
+                          <Globe size={14}/> {editingArtistId ? 'Update Artist' : 'Publish Web Page'}
                       </button>
                   </div>
               </div>
               
-              {/* The Actual Landing Page Component */}
-              <div className="pb-24"> {/* Padding for control bar */}
+              <div className="pb-24"> 
                   <ArtistLandingPage previewData={previewArtist} />
               </div>
           </div>
@@ -353,60 +486,194 @@ const AdminDashboard: React.FC = () => {
   return (
     <div className="min-h-screen bg-black text-white flex font-sans selection:bg-white selection:text-black">
       {/* Sidebar */}
-      <aside className="w-64 border-r border-white/10 p-6 flex flex-col bg-black h-screen sticky top-0">
-        <h2 className="text-2xl font-display italic font-bold text-white mb-2">UNIVERSAL <br/> ORCHARD</h2>
-        <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-12">Official</p>
-        
-        <nav className="space-y-4">
-          <button 
-            onClick={() => setActiveTab('create')}
-            className={`w-full text-left p-3 rounded-sm flex items-center gap-3 transition-all ${activeTab === 'create' ? 'bg-white text-black font-bold' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
-          >
-            <Music size={18} /> Roster Manager
-          </button>
+      <aside className="w-64 border-r border-white/10 p-6 flex flex-col bg-black h-screen sticky top-0 justify-between">
+        <div>
+            <h2 className="text-2xl font-display italic font-bold text-white mb-2">UNIVERSAL <br/> ORCHARD</h2>
+            <p className="text-[10px] uppercase tracking-widest text-gray-500 mb-12">Official</p>
+            
+            <nav className="space-y-4">
+            <button 
+                onClick={() => { setActiveTab('create'); resetForm(); }}
+                className={`w-full text-left p-3 rounded-sm flex items-center gap-3 transition-all ${activeTab === 'create' ? 'bg-white text-black font-bold' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+            >
+                <Music size={18} /> New Artist Page
+            </button>
+            
+            <button 
+                onClick={() => setActiveTab('sites')}
+                className={`w-full text-left p-3 rounded-sm flex items-center gap-3 transition-all ${activeTab === 'sites' ? 'bg-white text-black font-bold' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+            >
+                <Settings size={18} /> Manage Sites
+            </button>
 
-          <button 
-            onClick={() => setActiveTab('wall')}
-            className={`w-full text-left p-3 rounded-sm flex items-center gap-3 transition-all ${activeTab === 'wall' ? 'bg-white text-black font-bold' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
-          >
-            <ImageIcon size={18} /> Wall Photos
-          </button>
-          
-          <button 
-            onClick={() => setActiveTab('animations')}
-            className={`w-full text-left p-3 rounded-sm flex items-center gap-3 transition-all ${activeTab === 'animations' ? 'bg-white text-black font-bold' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
-          >
-            <Sparkles size={18} /> Visual FX
-          </button>
+            <button 
+                onClick={() => setActiveTab('wall')}
+                className={`w-full text-left p-3 rounded-sm flex items-center gap-3 transition-all ${activeTab === 'wall' ? 'bg-white text-black font-bold' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+            >
+                <ImageIcon size={18} /> Wall Photos
+            </button>
+            
+            <button 
+                onClick={() => setActiveTab('animations')}
+                className={`w-full text-left p-3 rounded-sm flex items-center gap-3 transition-all ${activeTab === 'animations' ? 'bg-white text-black font-bold' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+            >
+                <Sparkles size={18} /> Visual FX
+            </button>
 
-          <Link to="/" className="w-full text-left p-3 rounded-sm flex items-center gap-3 text-gray-400 hover:text-white hover:bg-white/5 mt-auto">
-             <LayoutGrid size={18} /> View Public Wall
-          </Link>
-        </nav>
-        
-        <div className="mt-8 pt-8 border-t border-white/10 text-[10px] text-gray-600 uppercase tracking-widest leading-relaxed">
-            All rights reserved, Universal Music Publishing, and its producers, Latin Grammy members, GalFly, and KRYLIN.
+            <Link to="/" className="w-full text-left p-3 rounded-sm flex items-center gap-3 text-gray-400 hover:text-white hover:bg-white/5 mt-auto">
+                <LayoutGrid size={18} /> View Public Wall
+            </Link>
+            </nav>
+        </div>
+
+        <div className="space-y-4">
+             {/* DB Status Indicator */}
+            <div className="border-t border-white/10 pt-4">
+                <div className="flex items-center gap-3 text-xs uppercase tracking-widest">
+                    <div className={`w-2 h-2 rounded-full ${dbStatus === 'connected' ? 'bg-green-500 shadow-[0_0_5px_#0f0]' : dbStatus === 'error' ? 'bg-red-500' : 'bg-yellow-500 animate-pulse'}`}></div>
+                    <span className={dbStatus === 'connected' ? 'text-white' : 'text-gray-500'}>
+                        {dbStatus === 'connected' ? 'DB Connected' : dbStatus === 'checking' ? 'Checking DB...' : 'DB Offline'}
+                    </span>
+                </div>
+            </div>
+
+            <button onClick={() => setIsAuthenticated(false)} className="w-full text-left p-3 rounded-sm flex items-center gap-3 text-red-500 hover:bg-red-500/10">
+                <Power size={18}/> Logout
+            </button>
         </div>
       </aside>
 
       {/* Main Content */}
       <main className="flex-1 p-8 md:p-12 overflow-y-auto h-screen bg-[#050505]">
         
+        {/* Manage Sites Tab (New) */}
+        {activeTab === 'sites' && (
+            <div className="max-w-6xl mx-auto space-y-8 animate-fade-in-up">
+                <h1 className="text-4xl font-display font-light text-white border-b border-white/10 pb-4">Manage <span className="text-gray-500 italic">Websites</span></h1>
+                
+                <div className="grid gap-6">
+                    {artists.length === 0 ? (
+                        <div className="text-gray-500 text-center py-12 uppercase tracking-widest text-xs border border-white/10 border-dashed">No Sites Generated Yet</div>
+                    ) : (
+                        artists.map(artist => (
+                            <div key={artist.id} className="bg-white/5 border border-white/10 p-6 flex flex-col md:flex-row justify-between items-center gap-6 group hover:border-white/30 transition">
+                                <div className="flex items-center gap-6 w-full">
+                                    <div className="w-16 h-16 bg-gray-900 overflow-hidden rounded-full border border-white/20">
+                                        <img src={artist.photoUrl} alt={artist.name} className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition"/>
+                                    </div>
+                                    <div className="flex-1">
+                                        <div className="flex items-center gap-3 mb-1">
+                                            <h3 className="text-xl font-display font-bold text-white">{artist.name}</h3>
+                                            <span className={`text-[9px] px-2 py-1 uppercase tracking-widest font-bold border ${
+                                                artist.status === 'active' ? 'border-green-500 text-green-500' :
+                                                artist.status === 'maintenance' ? 'border-yellow-500 text-yellow-500' :
+                                                artist.status === 'updating' ? 'border-blue-500 text-blue-500' :
+                                                artist.status === 'suspended' ? 'border-red-500 text-red-500' :
+                                                artist.status === 'editing' ? 'border-purple-500 text-purple-500' :
+                                                'border-gray-500 text-gray-500'
+                                            }`}>
+                                                {artist.status || 'Active'}
+                                            </span>
+                                        </div>
+                                        <Link to={`/artist/${artist.slug}`} target="_blank" className="text-xs text-gray-400 hover:text-white flex items-center gap-1">
+                                            <LinkIcon size={10}/> /{artist.slug}
+                                        </Link>
+                                    </div>
+                                </div>
+                                
+                                <div className="flex items-center gap-3 flex-wrap justify-end w-full md:w-auto">
+                                    <div className="flex border border-white/10 rounded-sm overflow-hidden bg-black">
+                                        <button 
+                                            onClick={() => handleUpdateStatus(artist, 'active')}
+                                            className={`p-2 hover:bg-white hover:text-black transition ${artist.status === 'active' || !artist.status ? 'bg-white/20 text-white' : 'text-gray-500'}`}
+                                            title="Set Active"
+                                        >
+                                            <CheckCircle size={16}/>
+                                        </button>
+                                        <button 
+                                            onClick={() => handleUpdateStatus(artist, 'maintenance')}
+                                            className={`p-2 hover:bg-yellow-500 hover:text-black transition ${artist.status === 'maintenance' ? 'bg-yellow-500/20 text-yellow-500' : 'text-gray-500'}`}
+                                            title="Set Maintenance"
+                                        >
+                                            <AlertTriangle size={16}/>
+                                        </button>
+                                        <button 
+                                            onClick={() => handleUpdateStatus(artist, 'updating')}
+                                            className={`p-2 hover:bg-blue-500 hover:text-white transition ${artist.status === 'updating' ? 'bg-blue-500/20 text-blue-500' : 'text-gray-500'}`}
+                                            title="Set Updating"
+                                        >
+                                            <RefreshCw size={16}/>
+                                        </button>
+                                         <button 
+                                            onClick={() => handleUpdateStatus(artist, 'editing')}
+                                            className={`p-2 hover:bg-purple-500 hover:text-white transition ${artist.status === 'editing' ? 'bg-purple-500/20 text-purple-500' : 'text-gray-500'}`}
+                                            title="Set Editing Mode"
+                                        >
+                                            <Edit3 size={16}/>
+                                        </button>
+                                        <button 
+                                            onClick={() => handleUpdateStatus(artist, 'suspended')}
+                                            className={`p-2 hover:bg-red-500 hover:text-white transition ${artist.status === 'suspended' ? 'bg-red-500/20 text-red-500' : 'text-gray-500'}`}
+                                            title="Suspend Site"
+                                        >
+                                            <XCircle size={16}/>
+                                        </button>
+                                        <button 
+                                            onClick={() => handleUpdateStatus(artist, 'unsigned')}
+                                            className={`p-2 hover:bg-gray-500 hover:text-white transition ${artist.status === 'unsigned' ? 'bg-gray-500/50 text-white' : 'text-gray-500'}`}
+                                            title="Mark Unsigned"
+                                        >
+                                            <AlertOctagon size={16}/>
+                                        </button>
+                                    </div>
+
+                                    <div className="flex items-center gap-2 ml-4">
+                                        <button 
+                                            onClick={() => handleEditArtist(artist)}
+                                            className="bg-white text-black p-2 rounded-sm hover:bg-gray-200 transition"
+                                            title="Edit Artist"
+                                        >
+                                            <Pencil size={16}/>
+                                        </button>
+                                        <button 
+                                            onClick={() => handleDeleteArtist(artist.id)}
+                                            className="bg-red-900/20 border border-red-500/30 text-red-500 p-2 rounded-sm hover:bg-red-500 hover:text-white transition"
+                                            title="Delete Permanently"
+                                        >
+                                            <Trash2 size={16}/>
+                                        </button>
+                                    </div>
+                                </div>
+                            </div>
+                        ))
+                    )}
+                </div>
+            </div>
+        )}
+
         {/* Create Artist Tab */}
         {activeTab === 'create' && (
           <div className="max-w-5xl mx-auto space-y-8 animate-fade-in-up">
             
             <div className="flex justify-between items-end border-b border-white/10 pb-4">
-                <h1 className="text-4xl font-display font-light text-white">New <span className="text-gray-500 italic">Candidate</span></h1>
-                {generatedPublicLink && (
-                    <button onClick={resetForm} className="text-xs uppercase tracking-widest hover:text-white text-gray-500">
-                        + Create Another
-                    </button>
-                )}
+                <h1 className="text-4xl font-display font-light text-white">
+                    {editingArtistId ? 'Edit' : 'New'} <span className="text-gray-500 italic">{editingArtistId ? 'Artist Profile' : 'Candidate'}</span>
+                </h1>
+                <div className="flex gap-4">
+                    {editingArtistId && (
+                        <button onClick={resetForm} className="text-xs uppercase tracking-widest hover:text-white text-red-500">
+                            Cancel Edit
+                        </button>
+                    )}
+                    {generatedPublicLink && !editingArtistId && (
+                        <button onClick={resetForm} className="text-xs uppercase tracking-widest hover:text-white text-gray-500">
+                            + Create Another
+                        </button>
+                    )}
+                </div>
             </div>
 
-            {/* Success / Link Generation Modal Area */}
-            {generatedPublicLink && (
+            {generatedPublicLink && !editingArtistId && (
                 <div className="bg-green-500/10 border border-green-500/50 p-6 rounded-sm flex flex-col md:flex-row items-center justify-between gap-6 animate-pulse-glow">
                     <div className="space-y-1">
                         <h3 className="text-green-400 font-bold uppercase tracking-widest text-sm flex items-center gap-2">
@@ -496,6 +763,7 @@ const AdminDashboard: React.FC = () => {
                                     className="w-full bg-black border border-white/20 p-3 text-white focus:border-green-500 outline-none transition-colors pr-24"
                                     placeholder="https://open.spotify.com/artist/..."
                                     onChange={(e) => handleSpotifyUrlChange(e.target.value)}
+                                    defaultValue={spotifyId ? `https://open.spotify.com/artist/${spotifyId}` : ''}
                                 />
                                 {spotifyId && <span className="absolute right-3 top-3 text-[10px] text-green-500 font-bold uppercase tracking-wider flex items-center gap-1"><Check size={10}/> Linked</span>}
                             </div>
@@ -600,6 +868,7 @@ const AdminDashboard: React.FC = () => {
                         className="w-full bg-black border border-white/10 p-2 text-xs focus:border-white outline-none text-white" 
                         placeholder="https://dropbox.com/..."
                         onChange={(e) => handleDropboxImageForArtist(e.target.value)}
+                        value={photoUrl.includes('dropbox') ? photoUrl : ''}
                       />
                   </div>
                 </div>
@@ -644,7 +913,7 @@ const AdminDashboard: React.FC = () => {
                 </div>
 
                 <button onClick={handlePreviewArtist} className="w-full bg-white text-black text-lg py-5 font-bold hover:bg-gray-200 transition uppercase tracking-widest mt-8 flex items-center justify-center gap-2">
-                   <Eye size={20}/> Publish to Go (Preview)
+                   <Eye size={20}/> {editingArtistId ? 'Update & Preview' : 'Publish to Go (Preview)'}
                 </button>
               </div>
             </div>
@@ -653,10 +922,14 @@ const AdminDashboard: React.FC = () => {
 
         {/* Wall Photos Tab */}
         {activeTab === 'wall' && (
-            <div className="max-w-2xl mx-auto space-y-8 animate-fade-in-up">
-                <h1 className="text-4xl font-display font-light text-white border-b border-white/10 pb-4">Add Wall <span className="text-gray-500 italic">Visuals</span></h1>
+            <div className="max-w-4xl mx-auto space-y-8 animate-fade-in-up">
+                <h1 className="text-4xl font-display font-light text-white border-b border-white/10 pb-4">Wall <span className="text-gray-500 italic">Visuals</span></h1>
                 
+                {/* Add New Section */}
                 <div className="bg-white/5 p-8 border border-white/10 space-y-6">
+                    <h3 className="text-xs font-bold uppercase tracking-widest text-white flex items-center gap-2">
+                         <Upload size={14}/> Add New Item
+                    </h3>
                     <div className="space-y-2">
                         <label className="text-xs uppercase tracking-widest text-gray-500 flex items-center gap-2">
                             <LinkIcon size={14}/> Dropbox Image Link
@@ -697,6 +970,34 @@ const AdminDashboard: React.FC = () => {
                     >
                         Upload to Infinite Wall
                     </button>
+                </div>
+
+                {/* Manage Existing Section */}
+                <div className="pt-8">
+                     <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-6 flex items-center gap-2">
+                         <Monitor size={14}/> Manage Active Wall ({existingWallItems.length} items)
+                     </h3>
+                     
+                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                         {existingWallItems.map(item => (
+                             <div key={item.id} className="group relative border border-white/10 bg-black aspect-square overflow-hidden">
+                                 <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition duration-500"/>
+                                 
+                                 <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition flex flex-col justify-end p-3">
+                                     <p className="text-xs font-bold truncate">{item.title}</p>
+                                     <p className="text-[9px] text-gray-400 uppercase tracking-widest truncate">{item.subtitle}</p>
+                                 </div>
+
+                                 <button 
+                                     onClick={() => handleDeleteWallItem(item.id)}
+                                     className="absolute top-2 right-2 bg-red-600 text-white p-2 rounded-full opacity-0 group-hover:opacity-100 hover:bg-red-700 transition transform hover:scale-110"
+                                     title="Delete Image"
+                                 >
+                                     <Trash2 size={12}/>
+                                 </button>
+                             </div>
+                         ))}
+                     </div>
                 </div>
             </div>
         )}

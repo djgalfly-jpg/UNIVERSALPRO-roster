@@ -1,6 +1,7 @@
 import { Artist, WallItem } from '../types';
+import pool from './db';
 
-// Initial Mock Data - Latin Grammy Theme
+// Initial Mock Data - Latin Grammy Theme (Used for Seeding)
 const INITIAL_ARTISTS: Artist[] = [
   {
     id: '1',
@@ -24,7 +25,8 @@ const INITIAL_ARTISTS: Artist[] = [
         "https://picsum.photos/800/600?random=3"
     ],
     visitCount: 1245092,
-    visitorCountries: ['Spain', 'USA', 'Mexico', 'Colombia', 'Argentina']
+    visitorCountries: ['Spain', 'USA', 'Mexico', 'Colombia', 'Argentina'],
+    status: 'active'
   },
   {
     id: '2',
@@ -44,7 +46,8 @@ const INITIAL_ARTISTS: Artist[] = [
     generatedLink: '/artist/bad-bunny',
     galleryUrls: [],
     visitCount: 5430210,
-    visitorCountries: ['Puerto Rico', 'USA', 'Spain', 'Chile']
+    visitorCountries: ['Puerto Rico', 'USA', 'Spain', 'Chile'],
+    status: 'active'
   }
 ];
 
@@ -61,109 +64,237 @@ const INITIAL_WALL: WallItem[] = [
     { id: 'w10', type: 'artist', title: 'Bizarrap', subtitle: 'Producer', imageUrl: 'https://picsum.photos/800/800?random=112' },
 ];
 
-export const getArtists = (): Artist[] => {
-  const stored = localStorage.getItem('uom_artists');
-  if (!stored) {
-    localStorage.setItem('uom_artists', JSON.stringify(INITIAL_ARTISTS));
-    return INITIAL_ARTISTS;
-  }
-  return JSON.parse(stored);
-};
+// Initialize Database Schema
+export const initDB = async () => {
+    try {
+        const client = await pool.connect();
+        try {
+            // Create Artists Table
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS artists (
+                    id TEXT PRIMARY KEY,
+                    slug TEXT UNIQUE,
+                    data JSONB
+                );
+            `);
 
-export const getArtistById = (idOrSlug: string): Artist | undefined => {
-  const artists = getArtists();
-  // Try ID first
-  const byId = artists.find(a => a.id === idOrSlug);
-  if (byId) return byId;
-  // Then try slug
-  return artists.find(a => a.slug === idOrSlug);
-};
+            // Create Wall Items Table
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS wall_items (
+                    id TEXT PRIMARY KEY,
+                    data JSONB
+                );
+            `);
 
-export const saveArtist = (artist: Artist): void => {
-  const artists = getArtists();
-  const existingIndex = artists.findIndex(a => a.id === artist.id);
-  if (existingIndex >= 0) {
-    artists[existingIndex] = artist;
-  } else {
-    artists.push(artist);
-  }
-  localStorage.setItem('uom_artists', JSON.stringify(artists));
-};
+            // Create Visual Effects Table
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS visual_effects (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );
+            `);
 
-export const trackArtistVisit = (artistId: string): Artist | null => {
-    const artists = getArtists();
-    const index = artists.findIndex(a => a.id === artistId);
-    
-    if (index >= 0) {
-        // Increment visit count
-        const currentVisits = artists[index].visitCount || 0;
-        artists[index].visitCount = currentVisits + 1;
-        
-        // Simulate adding a country occasionally
-        const potentialCountries = ['USA', 'Spain', 'Mexico', 'UK', 'France', 'Brazil', 'Japan', 'Germany', 'Argentina', 'Colombia'];
-        const existingCountries = artists[index].visitorCountries || [];
-        
-        // 10% chance to add a new country if not present
-        if (Math.random() > 0.9) {
-            const randomCountry = potentialCountries[Math.floor(Math.random() * potentialCountries.length)];
-            if (!existingCountries.includes(randomCountry)) {
-                existingCountries.push(randomCountry);
-                artists[index].visitorCountries = existingCountries;
+            // Seed Initial Data if Empty
+            const artistCount = await client.query('SELECT COUNT(*) FROM artists');
+            if (parseInt(artistCount.rows[0].count) === 0) {
+                console.log("Seeding Initial Artists...");
+                for (const artist of INITIAL_ARTISTS) {
+                    await client.query(
+                        'INSERT INTO artists (id, slug, data) VALUES ($1, $2, $3)',
+                        [artist.id, artist.slug, JSON.stringify(artist)]
+                    );
+                }
             }
+
+            const wallCount = await client.query('SELECT COUNT(*) FROM wall_items');
+            if (parseInt(wallCount.rows[0].count) === 0) {
+                console.log("Seeding Initial Wall...");
+                for (const item of INITIAL_WALL) {
+                    await client.query(
+                        'INSERT INTO wall_items (id, data) VALUES ($1, $2)',
+                        [item.id, JSON.stringify(item)]
+                    );
+                }
+            }
+
+        } finally {
+            client.release();
         }
-        
-        localStorage.setItem('uom_artists', JSON.stringify(artists));
-        return artists[index];
+        console.log("Database Initialized Successfully");
+    } catch (err) {
+        console.error("Failed to initialize database:", err);
     }
-    return null;
+};
+
+// Check DB Connection
+export const checkDbConnection = async (): Promise<boolean> => {
+    try {
+        const client = await pool.connect();
+        try {
+            await client.query('SELECT 1');
+            return true;
+        } finally {
+            client.release();
+        }
+    } catch (e) {
+        console.error("DB Check failed", e);
+        return false;
+    }
 }
 
-export const getWallItems = (): WallItem[] => {
-     const stored = localStorage.getItem('uom_wall');
-     if (!stored) {
-         localStorage.setItem('uom_wall', JSON.stringify(INITIAL_WALL));
-         return INITIAL_WALL;
+// --- Artists ---
+
+export const getArtists = async (): Promise<Artist[]> => {
+  try {
+      const result = await pool.query('SELECT data FROM artists');
+      return result.rows.map(row => row.data as Artist);
+  } catch (e) {
+      console.error(e);
+      return [];
+  }
+};
+
+export const getArtistById = async (idOrSlug: string): Promise<Artist | undefined> => {
+  try {
+      // Try ID
+      let result = await pool.query('SELECT data FROM artists WHERE id = $1', [idOrSlug]);
+      if (result.rows.length > 0) return result.rows[0].data as Artist;
+
+      // Try Slug
+      result = await pool.query('SELECT data FROM artists WHERE slug = $1', [idOrSlug]);
+      if (result.rows.length > 0) return result.rows[0].data as Artist;
+
+      return undefined;
+  } catch (e) {
+      console.error(e);
+      return undefined;
+  }
+};
+
+export const saveArtist = async (artist: Artist): Promise<void> => {
+  try {
+      await pool.query(
+          `INSERT INTO artists (id, slug, data) 
+           VALUES ($1, $2, $3) 
+           ON CONFLICT (id) 
+           DO UPDATE SET slug = $2, data = $3`,
+          [artist.id, artist.slug, JSON.stringify(artist)]
+      );
+  } catch (e) {
+      console.error("Error saving artist:", e);
+  }
+};
+
+export const deleteArtist = async (id: string): Promise<void> => {
+    try {
+        await pool.query('DELETE FROM artists WHERE id = $1', [id]);
+    } catch (e) {
+        console.error("Error deleting artist:", e);
+    }
+}
+
+export const trackArtistVisit = async (artistId: string): Promise<Artist | null> => {
+    try {
+        const client = await pool.connect();
+        try {
+            const res = await client.query('SELECT data FROM artists WHERE id = $1', [artistId]);
+            if (res.rows.length === 0) return null;
+
+            const artist = res.rows[0].data as Artist;
+            
+            // Logic to update stats
+            artist.visitCount = (artist.visitCount || 0) + 1;
+            
+            const potentialCountries = ['USA', 'Spain', 'Mexico', 'UK', 'France', 'Brazil', 'Japan', 'Germany', 'Argentina', 'Colombia'];
+            if (!artist.visitorCountries) artist.visitorCountries = [];
+            
+            if (Math.random() > 0.9) {
+                const randomCountry = potentialCountries[Math.floor(Math.random() * potentialCountries.length)];
+                if (!artist.visitorCountries.includes(randomCountry)) {
+                    artist.visitorCountries.push(randomCountry);
+                }
+            }
+
+            await client.query(
+                'UPDATE artists SET data = $1 WHERE id = $2',
+                [JSON.stringify(artist), artistId]
+            );
+            
+            return artist;
+        } finally {
+            client.release();
+        }
+    } catch (e) {
+        console.error("Error tracking visit:", e);
+        return null;
+    }
+}
+
+// --- Wall Items ---
+
+export const getWallItems = async (): Promise<WallItem[]> => {
+     try {
+         const result = await pool.query('SELECT data FROM wall_items ORDER BY id DESC'); // Naive sort, assuming newer IDs are higher or UUIDs
+         // Actually better to rely on insert order if we had a created_at, but for now just returning all
+         return result.rows.map(r => r.data as WallItem);
+     } catch (e) {
+         console.error(e);
+         return [];
      }
-     return JSON.parse(stored);
 }
 
-export const addToWall = (item: WallItem) => {
-    const items = getWallItems();
-    items.unshift(item); // Add to top
-    localStorage.setItem('uom_wall', JSON.stringify(items));
+export const addToWall = async (item: WallItem): Promise<void> => {
+    try {
+        await pool.query(
+            'INSERT INTO wall_items (id, data) VALUES ($1, $2)',
+            [item.id, JSON.stringify(item)]
+        );
+    } catch (e) {
+        console.error(e);
+    }
 }
+
+export const deleteWallItem = async (id: string): Promise<void> => {
+    try {
+        await pool.query('DELETE FROM wall_items WHERE id = $1', [id]);
+    } catch (e) {
+        console.error("Error deleting wall item:", e);
+    }
+}
+
+// --- Utils ---
 
 export const convertDropboxLink = (url: string): string => {
-    // Converts a standard Dropbox share link to a direct download image link
-    // Example: https://www.dropbox.com/s/xyz/image.jpg?dl=0 -> https://dl.dropboxusercontent.com/s/xyz/image.jpg
     if (url.includes('dropbox.com')) {
         return url.replace('www.dropbox.com', 'dl.dropboxusercontent.com').replace('?dl=0', '');
     }
     return url;
 }
 
-// Return an object with both effects
-export const getVisualEffects = (): { title: string, wall: string } => {
-    return {
-        title: localStorage.getItem('uom_fx_title') || '',
-        wall: localStorage.getItem('uom_fx_wall') || ''
-    };
+// --- Visual Effects ---
+
+export const getVisualEffects = async (): Promise<{ title: string, wall: string }> => {
+    try {
+        const titleRes = await pool.query("SELECT value FROM visual_effects WHERE key = 'title'");
+        const wallRes = await pool.query("SELECT value FROM visual_effects WHERE key = 'wall'");
+        
+        return {
+            title: titleRes.rows[0]?.value || '',
+            wall: wallRes.rows[0]?.value || ''
+        };
+    } catch (e) {
+        return { title: '', wall: '' };
+    }
 }
 
-// Save both effects separatelely
-export const saveVisualEffects = (titleFx: string, wallFx: string) => {
-    localStorage.setItem('uom_fx_title', titleFx);
-    localStorage.setItem('uom_fx_wall', wallFx);
-    
-    // Dispatch a custom event so other components can react instantly without reload
-    window.dispatchEvent(new Event('storage_fx_update'));
-}
-
-// Deprecated single setters (keeping for backward compatibility if needed temporarily)
-export const getActiveEffect = (): string => {
-    return localStorage.getItem('uom_fx_title') || '';
-}
-
-export const setActiveEffect = (effectClass: string) => {
-    localStorage.setItem('uom_fx_title', effectClass);
+export const saveVisualEffects = async (titleFx: string, wallFx: string): Promise<void> => {
+    try {
+        await pool.query("INSERT INTO visual_effects (key, value) VALUES ('title', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [titleFx]);
+        await pool.query("INSERT INTO visual_effects (key, value) VALUES ('wall', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [wallFx]);
+        
+        // Dispatch event for local reactivity if needed (though DB is source of truth now, a refresh might be needed)
+        window.dispatchEvent(new Event('storage_fx_update'));
+    } catch (e) {
+        console.error(e);
+    }
 }

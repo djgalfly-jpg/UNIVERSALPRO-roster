@@ -13,6 +13,8 @@ const getApiKey = () => {
   return '';
 };
 
+export const hasValidApiKey = () => !!getApiKey();
+
 const apiKey = getApiKey();
 const ai = new GoogleGenAI({ apiKey });
 

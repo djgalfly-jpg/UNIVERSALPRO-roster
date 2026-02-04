@@ -5,6 +5,7 @@ import AdminDashboard from './components/AdminDashboard';
 import ArtistLandingPage from './components/ArtistLandingPage';
 import LiveAssistant from './components/LiveAssistant';
 import LoadingScreen from './components/LoadingScreen';
+import { initDB } from './services/store';
 
 // Error Boundary Component to catch crashes
 class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean, error: Error | null}> {
@@ -41,6 +42,11 @@ class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasErr
 
 const App: React.FC = () => {
   const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    // Initialize Database on App Mount
+    initDB();
+  }, []);
 
   return (
     <ErrorBoundary>

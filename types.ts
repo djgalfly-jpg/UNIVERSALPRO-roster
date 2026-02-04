@@ -13,6 +13,8 @@ export interface Song {
   coverUrl: string;
 }
 
+export type ArtistStatus = 'active' | 'maintenance' | 'updating' | 'suspended' | 'unsigned' | 'editing';
+
 export interface Artist {
   id: string;
   slug: string; // Friendly URL part (e.g., 'bad-bunny')
@@ -30,6 +32,7 @@ export interface Artist {
   galleryUrls?: string[]; // Array of image URLs for the "Book"
   visitCount?: number;
   visitorCountries?: string[];
+  status: ArtistStatus;
 }
 
 export interface WallItem {

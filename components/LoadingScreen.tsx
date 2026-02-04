@@ -1,4 +1,6 @@
 import React, { useEffect, useState } from 'react';
+import { hasValidApiKey } from '../services/geminiService';
+import { AlertTriangle, Terminal } from 'lucide-react';
 
 interface LoadingScreenProps {
   onComplete: () => void;
@@ -7,8 +9,15 @@ interface LoadingScreenProps {
 const LoadingScreen: React.FC<LoadingScreenProps> = ({ onComplete }) => {
   const [percent, setPercent] = useState(0);
   const [text, setText] = useState("INITIALIZING SYSTEM");
+  const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
+    // Check API Key immediately
+    if (!hasValidApiKey()) {
+        setError("MISSING API KEY");
+        return;
+    }
+
     let interval: number;
     let currentPercent = 0;
 
@@ -38,6 +47,33 @@ const LoadingScreen: React.FC<LoadingScreenProps> = ({ onComplete }) => {
 
     return () => clearInterval(interval);
   }, [onComplete]);
+
+  if (error) {
+      return (
+        <div className="fixed inset-0 z-[9999] bg-black text-red-500 flex flex-col items-center justify-center font-mono p-8">
+            <AlertTriangle size={64} className="mb-6 animate-pulse" />
+            <h1 className="text-4xl font-bold mb-4 tracking-widest uppercase">System Halted</h1>
+            <div className="border border-red-900/50 bg-red-950/20 p-6 max-w-2xl w-full rounded-sm">
+                <p className="text-xl mb-4 text-white font-bold">CONFIGURATION ERROR: {error}</p>
+                <div className="space-y-4 text-sm text-gray-400">
+                    <p>The application cannot start because the Google Gemini API Key is missing.</p>
+                    
+                    <div className="bg-black p-4 border border-red-900/30">
+                        <p className="mb-2 text-white font-bold flex items-center gap-2"><Terminal size={12}/> Vercel Deployment Instructions:</p>
+                        <ol className="list-decimal list-inside space-y-2">
+                            <li>Go to your <strong>Vercel Project Dashboard</strong>.</li>
+                            <li>Navigate to <strong>Settings</strong> &gt; <strong>Environment Variables</strong>.</li>
+                            <li>Add a new variable:</li>
+                            <li className="pl-4">Key: <code className="text-white">VITE_API_KEY</code></li>
+                            <li className="pl-4">Value: <code className="text-white">Your_Gemini_API_Key</code></li>
+                            <li>Save and <strong>Redeploy</strong> your project.</li>
+                        </ol>
+                    </div>
+                </div>
+            </div>
+        </div>
+      );
+  }
 
   return (
     <div className="fixed inset-0 z-[9999] bg-black text-white flex flex-col items-center justify-center cursor-none">

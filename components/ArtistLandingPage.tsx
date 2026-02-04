@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
 import { getArtistById, trackArtistVisit } from '../services/store';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { Instagram, Youtube, Twitter, Music, Share2, Check, Download, Users, Globe, FileText } from 'lucide-react';
+import { Instagram, Youtube, Twitter, Music, Share2, Check, Download, Users, Globe, FileText, AlertTriangle, Hammer, RefreshCcw, Lock, Edit3 } from 'lucide-react';
 import { Artist } from '../types';
 
 interface Props {
@@ -41,21 +41,28 @@ const ArtistLandingPage: React.FC<Props> = ({ previewData }) => {
   const [artist, setArtist] = useState<Artist | null>(previewData || null);
   const [copied, setCopied] = useState(false);
   const [onlineUsers, setOnlineUsers] = useState(Math.floor(Math.random() * 200) + 50);
+  const [loading, setLoading] = useState(!previewData);
 
   useEffect(() => {
-    // If not previewing, load and track visit
-    if (!previewData && id) {
-        // Track visit returns the updated artist object
-        const updated = trackArtistVisit(id);
-        if (updated) {
-            setArtist(updated);
-        } else {
-             // Fallback if update fails
-             setArtist(getArtistById(id) || null);
+    const loadArtist = async () => {
+        // If not previewing, load and track visit
+        if (!previewData && id) {
+            // Track visit returns the updated artist object
+            const updated = await trackArtistVisit(id);
+            if (updated) {
+                setArtist(updated);
+            } else {
+                // Fallback if update fails
+                const fetched = await getArtistById(id);
+                setArtist(fetched || null);
+            }
+        } else if (previewData) {
+            setArtist(previewData);
         }
-    } else if (previewData) {
-        setArtist(previewData);
-    }
+        setLoading(false);
+    };
+
+    loadArtist();
   }, [id, previewData]);
 
   // Simulate online users fluctuation
@@ -69,8 +76,76 @@ const ArtistLandingPage: React.FC<Props> = ({ previewData }) => {
       return () => clearInterval(interval);
   }, []);
 
+  if (loading) {
+      return <div className="min-h-screen bg-black text-white flex items-center justify-center uppercase tracking-widest animate-pulse">Loading Asset...</div>;
+  }
+
   if (!artist) {
     return <div className="min-h-screen bg-black text-white flex items-center justify-center uppercase tracking-widest">Artist Not Found</div>;
+  }
+
+  // --- STATUS CHECKS ---
+  if (artist.status && artist.status !== 'active') {
+      let icon = <AlertTriangle size={64} className="mb-4 text-white"/>;
+      let title = "SITE UNAVAILABLE";
+      let message = "This page is currently not accessible.";
+      let colorClass = "text-gray-500";
+
+      switch(artist.status) {
+          case 'maintenance':
+              icon = <Hammer size={64} className="mb-6 text-yellow-500 animate-pulse"/>;
+              title = "UNDER MAINTENANCE";
+              message = "We are currently improving the experience. Please check back shortly.";
+              colorClass = "text-yellow-500";
+              break;
+          case 'updating':
+              icon = <RefreshCcw size={64} className="mb-6 text-blue-500 animate-spin-slow"/>;
+              title = "SYSTEM UPDATE";
+              message = "Updating artist statistics and discography. Syncing new assets.";
+              colorClass = "text-blue-500";
+              break;
+          case 'suspended':
+              icon = <Lock size={64} className="mb-6 text-red-600"/>;
+              title = "ACCESS SUSPENDED";
+              message = "This page has been temporarily suspended by Universal Orchard administration.";
+              colorClass = "text-red-600";
+              break;
+          case 'unsigned':
+              icon = <FileText size={64} className="mb-6 text-gray-600"/>;
+              title = "ARCHIVED PROFILE";
+              message = "This artist is no longer signed with Universal Orchard Music.";
+              colorClass = "text-gray-600";
+              break;
+          case 'editing':
+              icon = <Edit3 size={64} className="mb-6 text-purple-600"/>;
+              title = "IN EDITING MODE";
+              message = "The administration is currently making live edits to this profile.";
+              colorClass = "text-purple-600";
+              break;
+      }
+
+      return (
+          <div className="min-h-screen bg-black flex flex-col items-center justify-center p-8 relative overflow-hidden">
+               {/* Background Image with blur */}
+               <div className="absolute inset-0">
+                   <img src={artist.photoUrl} className="w-full h-full object-cover opacity-20 blur-xl grayscale"/>
+               </div>
+               
+               <div className="relative z-10 bg-black/80 backdrop-blur-md border border-white/10 p-12 max-w-2xl text-center flex flex-col items-center shadow-2xl">
+                   {icon}
+                   <h1 className={`text-4xl md:text-5xl font-display font-bold mb-4 uppercase tracking-widest ${colorClass}`}>
+                       {title}
+                   </h1>
+                   <div className="w-24 h-1 bg-white/20 mb-8"></div>
+                   <p className="text-white text-lg font-light mb-8 max-w-md leading-relaxed">
+                       {message}
+                   </p>
+                   <p className="text-[10px] text-gray-500 uppercase tracking-[0.3em]">
+                       Universal Orchard Music Group
+                   </p>
+               </div>
+          </div>
+      )
   }
 
   const statData = [

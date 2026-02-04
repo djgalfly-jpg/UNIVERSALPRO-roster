@@ -8,41 +8,47 @@ const PublicWall: React.FC = () => {
   const [activeEffects, setActiveEffects] = useState({ title: '', wall: '' });
 
   useEffect(() => {
-    // Load initial visual effects
-    setActiveEffects(getVisualEffects());
+    const fetchData = async () => {
+        // Load initial visual effects
+        const effects = await getVisualEffects();
+        setActiveEffects(effects);
+
+        // Prepare items for infinite scrolling columns
+        const baseItems = await getWallItems();
+        
+        // Create enough duplicates to ensure smooth scrolling loop
+        const distributed: WallItem[][] = [[], [], [], [], []];
+        
+        // Fill 5 columns
+        const fullList = [...baseItems, ...baseItems, ...baseItems, ...baseItems, ...baseItems]; // 5x duplication
+        
+        fullList.forEach((item, index) => {
+            distributed[index % 5].push(item);
+        });
+
+        setColumns(distributed);
+    };
+
+    fetchData();
 
     // Listen for changes from other tabs (Admin Panel) via custom event
     const handleStorageChange = (e: Event) => {
         // Custom event from same window
         if (e.type === 'storage_fx_update') {
-             setActiveEffects(getVisualEffects());
+             fetchData();
         }
     };
     
-    // Also listen to storage event for cross-tab updates
+    // Also listen to storage event for cross-tab updates (less reliable with DB but still good practice for events)
     const handleStorageEvent = (e: StorageEvent) => {
         if (e.key === 'uom_fx_title' || e.key === 'uom_fx_wall') {
-             setActiveEffects(getVisualEffects());
+             fetchData();
         }
     }
 
     window.addEventListener('storage_fx_update', handleStorageChange);
     window.addEventListener('storage', handleStorageEvent);
 
-    // Prepare items for infinite scrolling columns
-    const baseItems = getWallItems();
-    
-    // Create enough duplicates to ensure smooth scrolling loop
-    const distributed: WallItem[][] = [[], [], [], [], []];
-    
-    // Fill 5 columns
-    const fullList = [...baseItems, ...baseItems, ...baseItems, ...baseItems, ...baseItems]; // 5x duplication
-    
-    fullList.forEach((item, index) => {
-        distributed[index % 5].push(item);
-    });
-
-    setColumns(distributed);
 
     return () => {
         window.removeEventListener('storage_fx_update', handleStorageChange);
