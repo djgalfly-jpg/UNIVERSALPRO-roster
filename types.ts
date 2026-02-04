@@ -28,6 +28,8 @@ export interface SocialLinks {
 
 export type ArtistStatus = 'active' | 'maintenance' | 'updating' | 'suspended' | 'unsigned' | 'editing';
 
+export type BlockType = 'traffic' | 'bio' | 'music' | 'video' | 'stats';
+
 export interface Artist {
   id: string;
   slug: string; // Friendly URL part (e.g., 'bad-bunny')
@@ -46,7 +48,8 @@ export interface Artist {
   visitCount?: number;
   visitorCountries?: string[];
   status: ArtistStatus;
-  socialLinks?: SocialLinks; // New field for detailed social management
+  socialLinks?: SocialLinks; 
+  layoutOrder?: BlockType[]; // New: Controls the order of sections
 }
 
 export interface WallItem {
@@ -55,6 +58,15 @@ export interface WallItem {
   imageUrl: string;
   title: string;
   subtitle: string;
+}
+
+export interface ImpactStats {
+    produced: string;
+    promoted: string;
+    advised: string;
+    lyrics: string;
+    audiovisual: string;
+    buttonPosition?: 'left' | 'right' | 'center';
 }
 
 export type ViewMode = 'public' | 'admin' | 'artist_landing';

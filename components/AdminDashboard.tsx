@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Artist, WallItem, ArtistStatus, SocialLinks } from '../types';
-import { getArtists, saveArtist, addToWall, convertDropboxLink, getVisualEffects, saveVisualEffects, deleteArtist, getWallItems, deleteWallItem, checkDbConnection, getSiteLockStatus, setSiteLockStatus, clearWall, getSEOSettings, saveSEOSettings, SEOSettings, hardResetWall } from '../services/store';
+import { Artist, WallItem, ArtistStatus, SocialLinks, BlockType, ImpactStats } from '../types';
+import { getArtists, saveArtist, addToWall, convertDropboxLink, getVisualEffects, saveVisualEffects, deleteArtist, getWallItems, deleteWallItem, checkDbConnection, getSiteLockStatus, setSiteLockStatus, clearWall, getSEOSettings, saveSEOSettings, SEOSettings, hardResetWall, getImpactStats, saveImpactStats } from '../services/store';
 import { searchArtistBio, editArtistImage, extractSpotifyPlaylistData, generateSiteSEO } from '../services/geminiService';
 import { Link } from 'react-router-dom';
-import { Camera, Wand2, Search, Link as LinkIcon, Upload, Music, Loader2, Sparkles, LayoutGrid, Image as ImageIcon, CheckCircle, BarChart3, Youtube, Instagram, Twitter, Copy, Check, Eye, Globe, Images, Monitor, Type, Save, Disc, FileText, Lock, AlertTriangle, Trash2, Settings, Power, RefreshCw, XCircle, AlertOctagon, Edit3, ArrowLeft, Database, Pencil, Facebook, MessageCircle, Shield, Radio, ListPlus, Play, Key, SearchCode, Ghost, Zap, Gauge, MousePointerClick } from 'lucide-react';
+import { Camera, Wand2, Search, Link as LinkIcon, Upload, Music, Loader2, Sparkles, LayoutGrid, Image as ImageIcon, CheckCircle, BarChart3, Youtube, Instagram, Twitter, Copy, Check, Eye, Globe, Images, Monitor, Type, Save, Disc, FileText, Lock, AlertTriangle, Trash2, Settings, Power, RefreshCw, XCircle, AlertOctagon, Edit3, ArrowLeft, Database, Pencil, Facebook, MessageCircle, Shield, Radio, ListPlus, Play, Key, SearchCode, Ghost, Zap, Gauge, MousePointerClick, ArrowUp, ArrowDown, GripVertical, Activity, Move, Trophy } from 'lucide-react';
 import ArtistLandingPage from './ArtistLandingPage';
 
 const AdminDashboard: React.FC = () => {
@@ -12,7 +12,7 @@ const AdminDashboard: React.FC = () => {
   const [passwordInput, setPasswordInput] = useState('');
   const [authError, setAuthError] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'create' | 'wall' | 'animations' | 'sites' | 'seo'>('create');
+  const [activeTab, setActiveTab] = useState<'create' | 'wall' | 'animations' | 'sites' | 'seo' | 'impact'>('create');
   const [artists, setArtists] = useState<Artist[]>([]);
   
   // System Status
@@ -25,6 +25,11 @@ const AdminDashboard: React.FC = () => {
   const [seoTitle, setSeoTitle] = useState('');
   const [seoDesc, setSeoDesc] = useState('');
   const [seoKeywords, setSeoKeywords] = useState('');
+
+  // Impact Stats State
+  const [impactStats, setImpactStats] = useState<ImpactStats>({
+      produced: '', promoted: '', advised: '', lyrics: '', audiovisual: ''
+  });
 
   // FX State
   const [currentEffects, setCurrentEffects] = useState({ title: '', wall: '', speed: 45 });
@@ -41,7 +46,8 @@ const AdminDashboard: React.FC = () => {
   const [ytId, setYtId] = useState('');
   const [spotifyId, setSpotifyId] = useState('');
   const [bookUrl, setBookUrl] = useState('');
-  
+  const [layoutOrder, setLayoutOrder] = useState<BlockType[]>(['traffic', 'bio', 'video', 'music', 'stats']);
+
   // Social Media State
   const [socials, setSocials] = useState<SocialLinks>({
       youtube: { url: '', isActive: false },
@@ -59,11 +65,11 @@ const AdminDashboard: React.FC = () => {
   const [youtubeSubs, setYoutubeSubs] = useState('');
   const [instaFollowers, setInstaFollowers] = useState('');
   const [tiktokFollowers, setTiktokFollowers] = useState('');
+  const [visitCountInput, setVisitCountInput] = useState(''); // New state for editing visits
 
   // Creation & Preview State
   const [previewArtist, setPreviewArtist] = useState<Artist | null>(null);
   const [generatedPublicLink, setGeneratedPublicLink] = useState<string | null>(null);
-  const [justCopied, setJustCopied] = useState(false);
   
   // Wall Item Form State
   const [wallTitle, setWallTitle] = useState('');
@@ -109,6 +115,9 @@ const AdminDashboard: React.FC = () => {
           setSeoDesc(seo.description || '');
           setSeoKeywords(seo.keywords || '');
       }
+
+      const impact = await getImpactStats();
+      setImpactStats(impact);
   }
 
   const toggleSiteLock = async () => {
@@ -144,6 +153,11 @@ const AdminDashboard: React.FC = () => {
           setAuthError(true);
           setPasswordInput('');
       }
+  }
+
+  const handleSaveImpactStats = async () => {
+      await saveImpactStats(impactStats);
+      alert("Global Impact Stats Updated!");
   }
 
   const handleSearchBio = async () => {
@@ -215,6 +229,19 @@ const AdminDashboard: React.FC = () => {
       }));
   };
 
+  // --- Layout Reordering ---
+  const moveBlock = (index: number, direction: 'up' | 'down') => {
+      const newOrder = [...layoutOrder];
+      if (direction === 'up') {
+          if (index === 0) return;
+          [newOrder[index], newOrder[index - 1]] = [newOrder[index - 1], newOrder[index]];
+      } else {
+          if (index === newOrder.length - 1) return;
+          [newOrder[index], newOrder[index + 1]] = [newOrder[index + 1], newOrder[index]];
+      }
+      setLayoutOrder(newOrder);
+  };
+
   const generateSlug = (artistName: string) => {
       return artistName
         .toLowerCase()
@@ -238,6 +265,7 @@ const AdminDashboard: React.FC = () => {
       setYoutubeSubs(artist.stats.youtubeSubscribers.toString());
       setInstaFollowers(artist.stats.instagramFollowers.toString());
       setTiktokFollowers(artist.stats.tiktokFollowers.toString());
+      setVisitCountInput(artist.visitCount ? artist.visitCount.toString() : '0');
       
       // Load Socials robustly
       const defaultSocials: SocialLinks = {
@@ -251,6 +279,9 @@ const AdminDashboard: React.FC = () => {
       // Merge with defaults to prevent crashes if key is missing
       const mergedSocials = { ...defaultSocials, ...(artist.socialLinks || {}) };
       setSocials(mergedSocials);
+
+      // Load Layout Order
+      setLayoutOrder(artist.layoutOrder || ['traffic', 'bio', 'video', 'music', 'stats']);
       
       setActiveTab('create');
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -284,7 +315,8 @@ const AdminDashboard: React.FC = () => {
           isPublic: originalArtist ? originalArtist.isPublic : false,
           generatedLink: `${window.location.origin}${window.location.pathname}#/artist/${slug}`,
           galleryUrls: galleryUrls,
-          visitCount: originalArtist ? originalArtist.visitCount : 0,
+          // Use manual input for visits, or fallback to 0
+          visitCount: parseInt(visitCountInput) || 0,
           visitorCountries: originalArtist ? originalArtist.visitorCountries : [],
           status: originalArtist ? originalArtist.status : 'active',
           stats: {
@@ -294,7 +326,8 @@ const AdminDashboard: React.FC = () => {
             tiktokFollowers: parseInt(tiktokFollowers) || 0
           },
           topSongs: originalArtist ? originalArtist.topSongs : [],
-          socialLinks: socials
+          socialLinks: socials,
+          layoutOrder: layoutOrder
       };
 
       setPreviewArtist(tempArtist);
@@ -345,6 +378,7 @@ const AdminDashboard: React.FC = () => {
       setInstaFollowers('');
       setTiktokFollowers('');
       setGalleryInput('');
+      setVisitCountInput('');
       setPhotoUrl('https://picsum.photos/800/800');
       setSocials({
         youtube: { url: '', isActive: false },
@@ -353,6 +387,7 @@ const AdminDashboard: React.FC = () => {
         twitter: { url: '', isActive: false },
         discord: { url: '', isActive: false },
       });
+      setLayoutOrder(['traffic', 'bio', 'video', 'music', 'stats']);
       setGeneratedPublicLink(null);
       setPreviewArtist(null);
   }
@@ -574,51 +609,6 @@ const AdminDashboard: React.FC = () => {
       )
   }
 
-  const TITLE_EFFECTS = [
-      { id: '', name: 'No Effect' },
-      { id: 'anim-title-cinema', name: 'Cinema Tracking' },
-      { id: 'anim-title-shudder', name: 'Shudder' },
-      { id: 'anim-title-gradient-flow', name: 'Gradient Flow' },
-      { id: 'anim-title-3d-pop', name: '3D Pop' },
-      { id: 'anim-title-blur-out', name: 'Blur Out' },
-      { id: 'anim-title-squeeze', name: 'Squeeze' },
-      { id: 'anim-title-swing', name: 'Swing' },
-      { id: 'anim-title-elevator', name: 'Elevator' },
-      { id: 'anim-title-color-cycle', name: 'Color Cycle' },
-      { id: 'anim-title-mask-reveal', name: 'Mask Reveal' },
-      { id: 'anim-rainbow-text', name: 'Rainbow' },
-  ];
-
-  const WALL_EFFECTS = [
-      { id: '', name: 'No Effect' },
-      { id: 'anim-wall-breathing', name: 'Breathing' },
-      { id: 'anim-wall-kenburns', name: 'Ken Burns' },
-      { id: 'anim-wall-float', name: 'Float' },
-      { id: 'anim-wall-cyber-glitch', name: 'Cyber Glitch' },
-      { id: 'anim-wall-sepia-dream', name: 'Sepia Dream' },
-      { id: 'anim-wall-neon-border', name: 'Neon Border' },
-      { id: 'anim-wall-spin-slow', name: 'Spin Slow' },
-      { id: 'anim-wall-perspective-left', name: 'Perspective L' },
-      { id: 'anim-wall-perspective-right', name: 'Perspective R' },
-      { id: 'anim-wall-pulse-shock', name: 'Shockwave' },
-      { id: 'anim-wall-bw-flash', name: 'B&W Flash' },
-      { id: 'anim-wall-hue-trip', name: 'LSD Trip' },
-      { id: 'anim-wall-mirror-y', name: 'Upside Down' },
-      { id: 'anim-wall-shake-hard', name: 'Earthquake' },
-      { id: 'anim-wall-lens-flare', name: 'Lens Flare' },
-      { id: 'anim-wall-wobble-skew', name: 'Wobble Skew' },
-      { id: 'anim-wall-heartbeat', name: 'Heartbeat' },
-      { id: 'anim-wall-crt-flicker', name: 'CRT Flicker' },
-      { id: 'anim-wall-liquid-morph', name: 'Liquid Morph' },
-      { id: 'anim-wall-slide-glitch', name: 'Slide Glitch' },
-      { id: 'anim-wall-rotate-3d', name: '3D Rotate' },
-      // Legacy that works on walls
-      { id: 'anim-pulse-glow', name: 'Pulse Glow' },
-      { id: 'anim-glitch', name: 'Glitch' },
-      { id: 'anim-liquid-metal', name: 'Liquid Metal' },
-      { id: 'anim-invert', name: 'Invert' },
-  ];
-
   // --- RENDER PREVIEW MODE ---
   if (previewArtist) {
       return (
@@ -693,6 +683,13 @@ const AdminDashboard: React.FC = () => {
             >
                 <Sparkles size={18} /> Visual FX
             </button>
+            
+            <button 
+                onClick={() => setActiveTab('impact')}
+                className={`w-full text-left p-3 rounded-sm flex items-center gap-3 transition-all ${activeTab === 'impact' ? 'bg-white text-black font-bold' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+            >
+                <Trophy size={18} /> Global Impact
+            </button>
 
              <button 
                 onClick={() => setActiveTab('seo')}
@@ -738,6 +735,390 @@ const AdminDashboard: React.FC = () => {
       {/* Main Content */}
       <main className="flex-1 p-8 md:p-12 overflow-y-auto h-screen bg-[#050505]">
         
+        {/* === IMPACT STATS TAB === */}
+        {activeTab === 'impact' && (
+            <div className="max-w-4xl mx-auto space-y-8 animate-fade-in-up pb-24">
+                <h1 className="text-4xl font-display font-light text-white border-b border-white/10 pb-4">Global <span className="text-gray-500 italic">Impact Statistics</span></h1>
+                
+                <p className="text-gray-400 text-sm">
+                    Enter the cumulative figures for the label's history. These numbers will appear in the "Impact" popup on the public wall.
+                </p>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                    <div className="space-y-2">
+                         <label className="text-[10px] uppercase tracking-widest text-gray-500 block">Artists Produced</label>
+                         <input 
+                            className="w-full bg-black border border-white/20 p-4 text-xl font-display text-white outline-none focus:border-white"
+                            placeholder="e.g. 500+"
+                            value={impactStats.produced}
+                            onChange={(e) => setImpactStats({...impactStats, produced: e.target.value})}
+                         />
+                    </div>
+                    <div className="space-y-2">
+                         <label className="text-[10px] uppercase tracking-widest text-gray-500 block">Artists Promoted</label>
+                         <input 
+                            className="w-full bg-black border border-white/20 p-4 text-xl font-display text-white outline-none focus:border-white"
+                            placeholder="e.g. 1.2K"
+                            value={impactStats.promoted}
+                            onChange={(e) => setImpactStats({...impactStats, promoted: e.target.value})}
+                         />
+                    </div>
+                    <div className="space-y-2">
+                         <label className="text-[10px] uppercase tracking-widest text-gray-500 block">Artistic Advising</label>
+                         <input 
+                            className="w-full bg-black border border-white/20 p-4 text-xl font-display text-white outline-none focus:border-white"
+                            placeholder="e.g. 300"
+                            value={impactStats.advised}
+                            onChange={(e) => setImpactStats({...impactStats, advised: e.target.value})}
+                         />
+                    </div>
+                    <div className="space-y-2">
+                         <label className="text-[10px] uppercase tracking-widest text-gray-500 block">Lyrical Participation</label>
+                         <input 
+                            className="w-full bg-black border border-white/20 p-4 text-xl font-display text-white outline-none focus:border-white"
+                            placeholder="e.g. 5,000+"
+                            value={impactStats.lyrics}
+                            onChange={(e) => setImpactStats({...impactStats, lyrics: e.target.value})}
+                         />
+                    </div>
+                    <div className="space-y-2 md:col-span-2">
+                         <label className="text-[10px] uppercase tracking-widest text-gray-500 block">Audiovisual Arts</label>
+                         <input 
+                            className="w-full bg-black border border-white/20 p-4 text-xl font-display text-white outline-none focus:border-white"
+                            placeholder="e.g. 250 Productions"
+                            value={impactStats.audiovisual}
+                            onChange={(e) => setImpactStats({...impactStats, audiovisual: e.target.value})}
+                         />
+                    </div>
+                </div>
+
+                <div className="pt-6 border-t border-white/10">
+                    <button 
+                        onClick={handleSaveImpactStats}
+                        className="px-8 py-4 bg-white text-black font-bold uppercase tracking-widest hover:bg-gray-200 transition"
+                    >
+                        Save Global Stats
+                    </button>
+                </div>
+            </div>
+        )}
+        
+        {/* === WALL PHOTOS TAB === */}
+        {activeTab === 'wall' && (
+            <div className="max-w-7xl mx-auto space-y-8 animate-fade-in-up pb-24">
+                 <div className="flex flex-col md:flex-row justify-between items-end border-b border-white/10 pb-4 gap-4">
+                    <h1 className="text-4xl font-display font-light text-white">Public <span className="text-gray-500 italic">Wall Manager</span></h1>
+                    <div className="flex gap-2">
+                        <button onClick={handlePurgeGhosts} className="text-[10px] border border-orange-500/30 text-orange-500 px-4 py-2 hover:bg-orange-900/20 uppercase tracking-widest flex items-center gap-2">
+                            <Ghost size={12}/> Purge Ghosts
+                        </button>
+                        <button onClick={handleClearWall} className="text-[10px] border border-red-500/30 text-red-500 px-4 py-2 hover:bg-red-900/20 uppercase tracking-widest flex items-center gap-2">
+                            <AlertTriangle size={12}/> Nuclear Reset
+                        </button>
+                    </div>
+                 </div>
+
+                 <div className="grid grid-cols-1 xl:grid-cols-2 gap-8">
+                     {/* Manual Add Form */}
+                     <section className="bg-white/5 border border-white/10 p-6 space-y-4">
+                        <h3 className="text-xs font-bold uppercase tracking-widest text-white flex items-center gap-2">
+                            <Upload size={14}/> Add Single Item
+                        </h3>
+                        <div className="grid grid-cols-2 gap-4">
+                             <input className="bg-black border border-white/10 p-3 text-sm focus:border-white outline-none" placeholder="Title (e.g. New Album)" value={wallTitle} onChange={e => setWallTitle(e.target.value)} />
+                             <input className="bg-black border border-white/10 p-3 text-sm focus:border-white outline-none" placeholder="Subtitle (e.g. Coming Soon)" value={wallSubtitle} onChange={e => setWallSubtitle(e.target.value)} />
+                        </div>
+                        <input className="w-full bg-black border border-white/10 p-3 text-sm focus:border-white outline-none" placeholder="Dropbox Image Direct Link" value={dropboxLink} onChange={e => setDropboxLink(e.target.value)} />
+                        <button onClick={handleAddToWall} className="w-full bg-white text-black font-bold uppercase tracking-widest py-3 hover:bg-gray-200 transition text-xs">
+                            Add To Wall
+                        </button>
+                     </section>
+
+                     {/* Spotify Import */}
+                     <section className="bg-white/5 border border-white/10 p-6 space-y-4">
+                        <h3 className="text-xs font-bold uppercase tracking-widest text-green-500 flex items-center gap-2">
+                            <Music size={14}/> Spotify Playlist Import
+                        </h3>
+                        <textarea 
+                            className="w-full bg-black border border-green-900/30 p-3 text-sm focus:border-green-500 outline-none text-gray-300 h-24" 
+                            placeholder="Paste Spotify Playlist URL(s) here..." 
+                            value={spotifyPlaylistInput}
+                            onChange={e => setSpotifyPlaylistInput(e.target.value)}
+                        />
+                         <button onClick={handleSpotifyImport} className="w-full bg-green-600 text-white font-bold uppercase tracking-widest py-3 hover:bg-green-500 transition text-xs flex justify-center items-center gap-2">
+                            {isImporting ? <Loader2 className="animate-spin" size={14}/> : <ListPlus size={14}/>} 
+                            {isImporting ? 'Extracting Metadata...' : 'Import All Tracks'}
+                        </button>
+                     </section>
+                 </div>
+                 
+                 {/* Visual Grid of Items */}
+                 <div className="border-t border-white/10 pt-8">
+                     <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-6 flex items-center gap-2">
+                        <ImageIcon size={14}/> Active Wall Items ({existingWallItems.length})
+                     </h3>
+                     
+                     <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-6 gap-4">
+                         {existingWallItems.map((item) => (
+                             <div key={item.id} className="relative group aspect-square bg-gray-900 border border-white/10 overflow-hidden">
+                                 <img src={item.imageUrl} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition duration-500" alt={item.title} />
+                                 <div className="absolute top-2 right-2 opacity-0 group-hover:opacity-100 transition z-10">
+                                     <button onClick={() => handleDeleteWallItem(item.id)} className="bg-red-600 text-white p-2 hover:scale-110 transition shadow-lg">
+                                        <Trash2 size={12}/>
+                                     </button>
+                                 </div>
+                                 <div className="absolute bottom-0 left-0 w-full bg-black/80 p-2 border-t border-white/10">
+                                     <p className="text-[10px] font-bold text-white truncate">{item.title}</p>
+                                     <p className="text-[8px] text-gray-400 truncate">{item.subtitle}</p>
+                                 </div>
+                             </div>
+                         ))}
+                     </div>
+                 </div>
+            </div>
+        )}
+
+        {/* ... (Previous tabs remain same, just rendering logic above changed for 'impact') */}
+        {/* === VISUAL FX TAB === */}
+        {activeTab === 'animations' && (
+             <div className="max-w-7xl mx-auto space-y-8 animate-fade-in-up pb-24">
+                <h1 className="text-4xl font-display font-light text-white border-b border-white/10 pb-4">Visual <span className="text-gray-500 italic">Effects Engine</span></h1>
+                
+                <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
+                    
+                    {/* LEFT COLUMN: CONTROLS (5 Cols) */}
+                    <div className="lg:col-span-5 space-y-8">
+                        {/* Title Effects */}
+                        <section className="bg-white/5 p-6 border border-white/10 space-y-4">
+                            <h3 className="text-xs font-bold uppercase tracking-widest text-white flex items-center gap-2">
+                                <Type size={14}/> Main Title Animation
+                            </h3>
+                            <select 
+                                className="w-full bg-black border border-white/20 p-3 text-sm text-white outline-none focus:border-white"
+                                value={tempTitleFx}
+                                onChange={(e) => setTempTitleFx(e.target.value)}
+                            >
+                                <option value="">No Effect (Static)</option>
+                                <option value="anim-title-cinema">Cinema Tracking</option>
+                                <option value="anim-title-shudder">Shudder Glitch</option>
+                                <option value="anim-title-gradient-flow">Liquid Chrome</option>
+                                <option value="anim-title-3d-pop">3D Pop-Out</option>
+                                <option value="anim-title-blur-out">Blur Focus Cycle</option>
+                                <option value="anim-title-squeeze">Squeeze Beat</option>
+                                <option value="anim-title-swing">Swing</option>
+                                <option value="anim-title-elevator">Elevator Float</option>
+                                <option value="anim-title-color-cycle">RGB Cycle</option>
+                                <option value="anim-title-mask-reveal">Mask Reveal</option>
+                            </select>
+                            <p className="text-[10px] text-gray-500">Affects the "UNIVERSAL ORCHARD MUSIC" text on the public home page.</p>
+                        </section>
+
+                         {/* Wall Effects */}
+                        <section className="bg-white/5 p-6 border border-white/10 space-y-4">
+                            <h3 className="text-xs font-bold uppercase tracking-widest text-white flex items-center gap-2">
+                                <LayoutGrid size={14}/> Wall Item Interaction
+                            </h3>
+                            <select 
+                                className="w-full bg-black border border-white/20 p-3 text-sm text-white outline-none focus:border-white"
+                                value={tempWallFx}
+                                onChange={(e) => setTempWallFx(e.target.value)}
+                            >
+                                <option value="">No Effect (Clean)</option>
+                                <option value="anim-wall-breathing">Breathing Scale</option>
+                                <option value="anim-wall-kenburns">Ken Burns Drift</option>
+                                <option value="anim-wall-float">Zero Gravity</option>
+                                <option value="anim-wall-cyber-glitch">Cyber Glitch</option>
+                                <option value="anim-wall-sepia-dream">Sepia Dream</option>
+                                <option value="anim-wall-neon-border">Neon Border Pulse</option>
+                                <option value="anim-wall-spin-slow">Slow Rotation</option>
+                                <option value="anim-wall-perspective-left">3D Perspective Left</option>
+                                <option value="anim-wall-perspective-right">3D Perspective Right</option>
+                                <option value="anim-wall-pulse-shock">Pulse Shockwave</option>
+                                <option value="anim-wall-bw-flash">B&W Flash</option>
+                                <option value="anim-wall-hue-trip">Hue Trip</option>
+                                <option value="anim-wall-mirror-y">Vertical Mirror</option>
+                                <option value="anim-wall-shake-hard">Hard Shake</option>
+                                <option value="anim-wall-lens-flare">Lens Flare</option>
+                                <option value="anim-wall-wobble-skew">Wobble Skew</option>
+                                <option value="anim-wall-heartbeat">Heartbeat</option>
+                                <option value="anim-wall-crt-flicker">CRT Flicker</option>
+                                <option value="anim-wall-liquid-morph">Liquid Morph</option>
+                                <option value="anim-wall-slide-glitch">Slide Glitch</option>
+                                <option value="anim-wall-rotate-3d">Rotate 3D</option>
+                            </select>
+                            <p className="text-[10px] text-gray-500">Applied to every album/photo in the infinite scroll.</p>
+                        </section>
+
+                        <section className="bg-white/5 p-6 border border-white/10 space-y-6">
+                             <h3 className="text-xs font-bold uppercase tracking-widest text-white flex items-center gap-2">
+                                <Move size={14}/> Scroll Speed Control
+                            </h3>
+                            <div className="flex items-center gap-4">
+                                 <span className="text-[10px] font-mono uppercase text-red-400">Hyper Fast</span>
+                                 <input 
+                                    type="range" 
+                                    min="5" 
+                                    max="200" 
+                                    step="5"
+                                    value={wallSpeed} 
+                                    onChange={(e) => setWallSpeed(parseInt(e.target.value))}
+                                    className="w-full accent-white h-1 bg-gray-700 rounded-lg appearance-none cursor-pointer"
+                                />
+                                <span className="text-[10px] font-mono uppercase text-blue-400">Frozen Slow</span>
+                            </div>
+                            <div className="flex justify-between text-[10px] font-mono text-gray-500">
+                                <span>5s Loop</span>
+                                <span>Current: {wallSpeed}s</span>
+                                <span>200s Loop</span>
+                            </div>
+                        </section>
+
+                        <button 
+                            onClick={applyEffects}
+                            className="w-full bg-white text-black py-4 font-bold uppercase tracking-widest hover:bg-gray-200 transition shadow-xl text-sm"
+                        >
+                            Apply To Public Site
+                        </button>
+                    </div>
+
+                    {/* RIGHT COLUMN: PREVIEWS (7 Cols) */}
+                    <div className="lg:col-span-7 space-y-6 sticky top-6">
+                        <div className="flex items-center gap-2 text-xs uppercase tracking-widest text-gray-500 mb-2">
+                            <Eye size={14}/> Real-time Preview Simulation
+                        </div>
+
+                        {/* Title Preview Box */}
+                        <div className="bg-black border border-white/10 aspect-video flex flex-col items-center justify-center relative overflow-hidden group">
+                            <div className="absolute top-0 left-0 bg-white/10 px-2 py-1 text-[9px] uppercase tracking-widest text-white">Header Title</div>
+                            <div className="absolute inset-0 bg-[radial-gradient(circle_at_center,_var(--tw-gradient-stops))] from-gray-800/20 to-transparent opacity-50"></div>
+                            
+                            {/* Actual Title Effect */}
+                            <div className={`text-center z-10 ${tempTitleFx}`}>
+                                <h2 className="text-4xl md:text-5xl font-display font-bold tracking-tighter text-white">
+                                    UNIVERSAL <br/>
+                                    <span className="italic font-light text-gray-300">ORCHARD</span>
+                                </h2>
+                            </div>
+                        </div>
+
+                        {/* Wall Item Preview Box */}
+                        <div className="grid grid-cols-2 gap-6">
+                             <div className="bg-black border border-white/10 aspect-square flex flex-col items-center justify-center relative overflow-hidden p-8">
+                                <div className="absolute top-0 left-0 bg-white/10 px-2 py-1 text-[9px] uppercase tracking-widest text-white">Wall Item Effect</div>
+                                
+                                <div className={`w-full h-full relative group ${tempWallFx}`}>
+                                     <img 
+                                        src="https://images.unsplash.com/photo-1493225255756-d9584f8606e9?q=80&w=1000&auto=format&fit=crop" 
+                                        alt="Preview" 
+                                        className="w-full h-full object-cover grayscale group-hover:grayscale-0 transition duration-500"
+                                    />
+                                    <div className="absolute bottom-0 left-0 w-full bg-black/60 p-2 backdrop-blur-sm">
+                                        <div className="h-2 w-20 bg-white/50 mb-1"></div>
+                                        <div className="h-1 w-12 bg-white/30"></div>
+                                    </div>
+                                </div>
+                             </div>
+
+                             <div className="bg-black border border-white/10 aspect-square flex flex-col items-center justify-center relative overflow-hidden p-6">
+                                <div className="absolute top-0 left-0 bg-white/10 px-2 py-1 text-[9px] uppercase tracking-widest text-white">Scroll Speed Viz</div>
+                                <div className="text-center space-y-2 z-10">
+                                    <div className="text-4xl font-bold font-mono">{wallSpeed}s</div>
+                                    <div className="text-[10px] text-gray-500 uppercase tracking-widest">Cycle Duration</div>
+                                </div>
+                                {/* Visualizing speed */}
+                                <div className="absolute inset-0 opacity-20 flex gap-2">
+                                     <div className="w-full h-full border-r border-white/20 animate-scroll-up" style={{animationDuration: `${Math.max(1, wallSpeed / 10)}s`}}></div>
+                                     <div className="w-full h-full border-r border-white/20 animate-scroll-down" style={{animationDuration: `${Math.max(1, wallSpeed / 10)}s`}}></div>
+                                </div>
+                             </div>
+                        </div>
+                    </div>
+                </div>
+             </div>
+        )}
+        
+        {/* ... (Existing SEO, Sites, Create tabs logic preserved) ... */}
+        {/* === SEO TAB === */}
+        {activeTab === 'seo' && (
+             <div className="max-w-4xl mx-auto space-y-8 animate-fade-in-up pb-24">
+                <h1 className="text-4xl font-display font-light text-white border-b border-white/10 pb-4">Google <span className="text-gray-500 italic">SEO Config</span></h1>
+
+                <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
+                     <div className="lg:col-span-2 space-y-6">
+                         <div className="space-y-2">
+                             <label className="text-[10px] uppercase tracking-widest text-gray-500">Site Meta Title</label>
+                             <input 
+                                className="w-full bg-black border border-white/20 p-4 text-white focus:border-blue-500 outline-none font-display text-xl"
+                                placeholder="Universal Orchard Music..."
+                                value={seoTitle}
+                                onChange={e => setSeoTitle(e.target.value)}
+                             />
+                             <div className="flex justify-between text-[10px] text-gray-600">
+                                 <span>Preview: {seoTitle.length}/60 chars</span>
+                             </div>
+                         </div>
+
+                         <div className="space-y-2">
+                             <label className="text-[10px] uppercase tracking-widest text-gray-500">Meta Description</label>
+                             <textarea 
+                                className="w-full bg-black border border-white/20 p-4 text-sm text-gray-300 focus:border-blue-500 outline-none h-32 leading-relaxed"
+                                placeholder="A description of the label for Google search results..."
+                                value={seoDesc}
+                                onChange={e => setSeoDesc(e.target.value)}
+                             />
+                             <div className="flex justify-between text-[10px] text-gray-600">
+                                 <span>Preview: {seoDesc.length}/160 chars</span>
+                             </div>
+                         </div>
+
+                         <div className="space-y-2">
+                             <label className="text-[10px] uppercase tracking-widest text-gray-500">Keywords (Comma Separated)</label>
+                             <input 
+                                className="w-full bg-black border border-white/20 p-4 text-xs text-gray-400 focus:border-blue-500 outline-none font-mono"
+                                placeholder="music, label, artist, ..."
+                                value={seoKeywords}
+                                onChange={e => setSeoKeywords(e.target.value)}
+                             />
+                         </div>
+                     </div>
+
+                     <div className="lg:col-span-1 space-y-4">
+                         <div className="bg-blue-900/10 border border-blue-500/30 p-6 space-y-4">
+                             <h3 className="text-xs font-bold uppercase tracking-widest text-blue-400 flex items-center gap-2">
+                                <Sparkles size={14}/> AI Optimization
+                             </h3>
+                             <p className="text-[10px] text-gray-400 leading-relaxed">
+                                 Use Gemini AI to analyze your current artist roster and generate the perfect SEO tags to rank for "Music Label" and specific artist names.
+                             </p>
+                             <button 
+                                onClick={handleAutoSEO}
+                                disabled={isGeneratingSEO}
+                                className="w-full bg-blue-600 text-white font-bold uppercase tracking-widest py-3 hover:bg-blue-500 transition text-[10px] flex items-center justify-center gap-2"
+                             >
+                                 {isGeneratingSEO ? <Loader2 className="animate-spin" size={12}/> : <SearchCode size={12}/>}
+                                 Auto-Generate
+                             </button>
+                         </div>
+                         
+                         <div className="border-t border-white/10 pt-4">
+                             <button 
+                                onClick={handleSaveManualSEO}
+                                className="w-full bg-white text-black font-bold uppercase tracking-widest py-4 hover:bg-gray-200 transition text-xs flex items-center justify-center gap-2"
+                             >
+                                 <Save size={14}/> Save Settings
+                             </button>
+                         </div>
+
+                         {seoSettings?.lastUpdated && (
+                             <p className="text-[9px] text-center text-gray-600 uppercase tracking-widest">
+                                 Last Updated: {new Date(seoSettings.lastUpdated).toLocaleDateString()}
+                             </p>
+                         )}
+                     </div>
+                </div>
+             </div>
+        )}
+
         {/* Manage Sites Tab */}
         {activeTab === 'sites' && (
             <div className="max-w-6xl mx-auto space-y-8 animate-fade-in-up">
@@ -910,7 +1291,36 @@ const AdminDashboard: React.FC = () => {
                         </div>
                     </div>
                 </section>
-                {/* ...Rest of create sections... */}
+                
+                {/* Layout Ordering - NEW */}
+                <section className="bg-white/5 border border-white/10 p-6 space-y-6">
+                    <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-white flex items-center gap-2">
+                        <LayoutGrid size={14} className="text-orange-500"/> Page Structure (Layout)
+                    </h3>
+                    <p className="text-[10px] text-gray-500">Drag to reorder sections on the artist's page.</p>
+                    
+                    <div className="space-y-2">
+                        {layoutOrder.map((block, index) => (
+                            <div key={block} className="flex items-center justify-between bg-black border border-white/10 p-3 rounded-sm group">
+                                <div className="flex items-center gap-3">
+                                    <GripVertical size={14} className="text-gray-600 cursor-move"/>
+                                    <span className="text-xs uppercase tracking-widest font-bold">
+                                        {block === 'traffic' && 'Live Traffic & Analytics'}
+                                        {block === 'bio' && 'Biography & Info'}
+                                        {block === 'video' && 'Featured Video'}
+                                        {block === 'music' && 'Discography & Gallery'}
+                                        {block === 'stats' && 'Social Stats & Links'}
+                                    </span>
+                                </div>
+                                <div className="flex items-center gap-1">
+                                    <button onClick={() => moveBlock(index, 'up')} disabled={index === 0} className="p-1 hover:bg-white/10 text-gray-400 hover:text-white disabled:opacity-20"><ArrowUp size={14}/></button>
+                                    <button onClick={() => moveBlock(index, 'down')} disabled={index === layoutOrder.length - 1} className="p-1 hover:bg-white/10 text-gray-400 hover:text-white disabled:opacity-20"><ArrowDown size={14}/></button>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </section>
+
                  <section className="bg-white/5 border border-white/10 p-6 space-y-6">
                      <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-white flex items-center gap-2">
                         <Disc size={14} className="text-green-500 animate-spin-slow"/> Discography & Media
@@ -1043,6 +1453,21 @@ const AdminDashboard: React.FC = () => {
                                 onChange={(e) => setTiktokFollowers(e.target.value)}
                             />
                         </div>
+
+                        {/* NEW: Total Page Impressions Manual Edit */}
+                        <div className="col-span-2 space-y-2 border-t border-white/10 pt-4 mt-2">
+                            <label className="text-[10px] uppercase tracking-widest text-green-500 flex items-center gap-2">
+                                <Activity size={10}/> Total Page Impressions (Manual Override)
+                            </label>
+                            <input 
+                                type="number"
+                                className="w-full bg-black border border-green-900/30 p-3 text-green-500 focus:border-green-500 outline-none font-mono font-bold"
+                                placeholder="0"
+                                value={visitCountInput}
+                                onChange={(e) => setVisitCountInput(e.target.value)}
+                            />
+                            <p className="text-[9px] text-gray-600">Manually set the visit counter. Future visits will increment from this number.</p>
+                        </div>
                     </div>
                 </section>
               </div>
@@ -1122,344 +1547,6 @@ const AdminDashboard: React.FC = () => {
               </div>
             </div>
           </div>
-        )}
-
-        {/* SEO AUTO ENGINE */}
-        {activeTab === 'seo' && (
-            <div className="max-w-4xl mx-auto space-y-8 animate-fade-in-up">
-                 <h1 className="text-4xl font-display font-light text-white border-b border-white/10 pb-4">Search <span className="text-gray-500 italic">Engine Optimization</span></h1>
-                 
-                 {/* 1. Generator Control */}
-                 <div className="bg-green-900/10 border border-green-500/20 p-8 space-y-6 relative overflow-hidden">
-                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative z-10">
-                        <div>
-                             <h3 className="text-lg font-bold uppercase tracking-widest text-green-400 flex items-center gap-2">
-                                <SearchCode size={20}/> Automatic Indexing Engine
-                             </h3>
-                             <p className="text-xs text-gray-400 mt-2 max-w-lg">
-                                This tool uses AI to analyze your entire artist roster and generate the perfect metadata. Click generate to populate the fields below, then review and save.
-                             </p>
-                        </div>
-                        <button 
-                            onClick={handleAutoSEO}
-                            disabled={isGeneratingSEO}
-                            className="bg-green-600 hover:bg-green-500 text-white px-8 py-4 font-bold uppercase tracking-widest text-xs flex items-center gap-2 disabled:opacity-50 transition shadow-[0_0_20px_rgba(34,197,94,0.3)]"
-                        >
-                            {isGeneratingSEO ? <Loader2 className="animate-spin" size={16}/> : <Sparkles size={16}/>}
-                            {isGeneratingSEO ? 'AI IS OPTIMIZING...' : 'GENERATE AUTO-SEO'}
-                        </button>
-                     </div>
-                 </div>
-
-                 {/* 2. Manual Editing Form */}
-                 <div className="bg-white/5 border border-white/10 p-8 space-y-6">
-                     <div className="flex items-center justify-between border-b border-white/10 pb-4 mb-6">
-                         <h3 className="text-xs font-bold uppercase tracking-widest text-white flex items-center gap-2">
-                             <MousePointerClick size={14}/> Site Metadata Control
-                         </h3>
-                         {seoSettings?.lastUpdated && (
-                             <span className="text-[10px] text-gray-500 uppercase tracking-widest">Last Updated: {new Date(seoSettings.lastUpdated).toLocaleDateString()}</span>
-                         )}
-                     </div>
-
-                     <div className="space-y-6">
-                        <div className="space-y-2">
-                            <label className="text-[10px] uppercase tracking-widest text-gray-500">Page Title (Browser Tab)</label>
-                            <input 
-                                className="w-full bg-black border border-white/20 p-3 text-white focus:border-green-500 outline-none transition-colors"
-                                value={seoTitle}
-                                onChange={(e) => setSeoTitle(e.target.value)}
-                                placeholder="e.g. Universal Orchard Music | Global Icons"
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <label className="text-[10px] uppercase tracking-widest text-gray-500">Meta Description (Google Snippet)</label>
-                            <textarea 
-                                className="w-full bg-black border border-white/20 p-3 text-white focus:border-green-500 outline-none h-24"
-                                value={seoDesc}
-                                onChange={(e) => setSeoDesc(e.target.value)}
-                                placeholder="A brief description of the label and roster..."
-                            />
-                        </div>
-
-                        <div className="space-y-2">
-                            <label className="text-[10px] uppercase tracking-widest text-gray-500">Meta Keywords (Comma Separated)</label>
-                            <textarea 
-                                className="w-full bg-black border border-white/20 p-3 text-white focus:border-green-500 outline-none h-24 font-mono text-xs"
-                                value={seoKeywords}
-                                onChange={(e) => setSeoKeywords(e.target.value)}
-                                placeholder="music, latin, pop, flamenco, urban..."
-                            />
-                        </div>
-
-                        <button 
-                            onClick={handleSaveManualSEO}
-                            className="w-full bg-white text-black p-4 font-bold uppercase tracking-widest hover:bg-gray-200 transition flex justify-center items-center gap-2"
-                        >
-                            <Save size={16}/> Save SEO Configuration
-                        </button>
-                     </div>
-                 </div>
-            </div>
-        )}
-
-        {/* Wall Photos Tab */}
-        {activeTab === 'wall' && (
-            <div className="max-w-4xl mx-auto space-y-8 animate-fade-in-up">
-                <div className="flex flex-col md:flex-row justify-between items-end border-b border-white/10 pb-4 gap-4">
-                     <div>
-                        <h1 className="text-4xl font-display font-light text-white">Wall <span className="text-gray-500 italic">Visuals</span></h1>
-                        <p className="text-xs text-gray-500 mt-2">Manage the infinite scroll wall content.</p>
-                     </div>
-                     
-                     <div className="flex items-center gap-3">
-                         <button 
-                            onClick={handlePurgeGhosts} 
-                            className="bg-orange-500/10 border border-orange-500/50 text-orange-500 hover:bg-orange-500 hover:text-white px-4 py-2 text-[10px] uppercase tracking-widest flex items-center gap-2 transition-all"
-                        >
-                            <Ghost size={14}/> Purge Broken
-                        </button>
-                        <button 
-                            onClick={handleClearWall} 
-                            className="bg-red-600 text-white hover:bg-red-700 px-6 py-2 text-[10px] uppercase tracking-widest font-bold flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(220,38,38,0.5)]"
-                        >
-                            <Trash2 size={14}/> ERASE ALL IMAGES
-                        </button>
-                     </div>
-                </div>
-                
-                {/* AI Import Section - NEW */}
-                <div className="bg-green-900/20 border border-green-500/30 p-8 space-y-6 relative overflow-hidden">
-                    <div className="absolute top-0 right-0 p-4 opacity-10"><Music size={100} /></div>
-                    
-                    <div className="flex items-start justify-between relative z-10">
-                        <div>
-                            <h3 className="text-xs font-bold uppercase tracking-widest text-green-400 flex items-center gap-2 relative z-10">
-                                <Sparkles size={14}/> AI Spotify Batch Importer
-                            </h3>
-                            <p className="text-[10px] text-gray-400 max-w-md mt-1">
-                                Paste multiple Spotify Playlist URLs (one per line). The AI will extract tracklists and find high-quality covers.
-                            </p>
-                        </div>
-                    </div>
-
-                    <div className="flex flex-col gap-4 relative z-10 mt-4">
-                         <div className="flex-1 space-y-2">
-                            <label className="text-[9px] uppercase tracking-widest text-gray-500 flex items-center gap-2"><ListPlus size={10}/> Playlist URLs (One per line)</label>
-                            <textarea 
-                                className="w-full bg-black border border-green-500/30 p-3 text-white text-xs focus:border-green-500 outline-none h-32 font-mono leading-relaxed"
-                                value={spotifyPlaylistInput}
-                                onChange={(e) => setSpotifyPlaylistInput(e.target.value)}
-                                placeholder="https://open.spotify.com/playlist/..."
-                            />
-                         </div>
-                         <button 
-                            onClick={handleSpotifyImport}
-                            disabled={isImporting}
-                            className="bg-green-600 text-white p-4 font-bold uppercase tracking-widest hover:bg-green-500 transition text-xs flex items-center justify-center gap-2 disabled:opacity-50 w-full"
-                         >
-                             {isImporting ? <Loader2 className="animate-spin" size={14}/> : <Radio size={14}/>}
-                             {isImporting ? 'Processing Batch Import...' : 'Run Batch Import'}
-                         </button>
-                    </div>
-                </div>
-
-                {/* Add New Manual Section */}
-                <div className="bg-white/5 p-8 border border-white/10 space-y-6">
-                    <h3 className="text-xs font-bold uppercase tracking-widest text-white flex items-center gap-2">
-                         <Upload size={14}/> Add Manual Item
-                    </h3>
-                    <div className="space-y-2">
-                        <label className="text-xs uppercase tracking-widest text-gray-500 flex items-center gap-2">
-                            <LinkIcon size={14}/> Dropbox Image Link
-                        </label>
-                        <input 
-                            className="w-full bg-black border border-white/20 p-4 text-white focus:border-white outline-none transition-colors"
-                            placeholder="https://www.dropbox.com/s/xyz/photo.jpg?dl=0"
-                            value={dropboxLink}
-                            onChange={(e) => setDropboxLink(e.target.value)}
-                        />
-                        <p className="text-[10px] text-gray-500">Link will be automatically converted for direct viewing.</p>
-                    </div>
-
-                    <div className="grid grid-cols-2 gap-6">
-                        <div className="space-y-2">
-                            <label className="text-xs uppercase tracking-widest text-gray-500">Title / Artist</label>
-                            <input 
-                                className="w-full bg-black border border-white/20 p-3 text-white focus:border-white outline-none"
-                                placeholder="e.g. Backstage"
-                                value={wallTitle}
-                                onChange={(e) => setWallTitle(e.target.value)}
-                            />
-                        </div>
-                        <div className="space-y-2">
-                            <label className="text-xs uppercase tracking-widest text-gray-500">Subtitle</label>
-                            <input 
-                                className="w-full bg-black border border-white/20 p-3 text-white focus:border-white outline-none"
-                                placeholder="e.g. Latin Grammy 2024"
-                                value={wallSubtitle}
-                                onChange={(e) => setWallSubtitle(e.target.value)}
-                            />
-                        </div>
-                    </div>
-
-                    <button 
-                        onClick={handleAddToWall}
-                        className="w-full bg-white text-black p-4 font-bold uppercase tracking-widest hover:bg-gray-200 transition mt-4"
-                    >
-                        Upload to Infinite Wall
-                    </button>
-                </div>
-
-                {/* Manage Existing Section */}
-                <div className="pt-8">
-                     <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500 mb-6 flex items-center gap-2">
-                         <Monitor size={14}/> Manage Active Wall ({existingWallItems.length} items)
-                     </h3>
-                     
-                     {existingWallItems.length === 0 ? (
-                         <div className="border border-white/10 border-dashed p-8 text-center text-gray-500 uppercase tracking-widest text-xs">
-                             Wall is currently empty. Upload images via Spotify Import or Manually.
-                         </div>
-                     ) : (
-                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                            {existingWallItems.map(item => (
-                                <div key={item.id} className="group relative border border-white/10 bg-black aspect-square overflow-hidden hover:border-red-500/50 transition-colors">
-                                    {item.imageUrl ? (
-                                        <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition duration-500"/>
-                                    ) : (
-                                        <div className="w-full h-full flex flex-col items-center justify-center text-red-500 p-4 text-center bg-red-900/10">
-                                            <AlertTriangle size={24} className="mb-2"/>
-                                            <span className="text-[9px] uppercase tracking-widest font-bold">Corrupted Data</span>
-                                        </div>
-                                    )}
-                                    
-                                    <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition flex flex-col justify-end p-3 pointer-events-none">
-                                        <p className="text-xs font-bold truncate text-white">{item.title || 'Untitled'}</p>
-                                        <p className="text-[9px] text-gray-400 uppercase tracking-widest truncate">{item.subtitle}</p>
-                                    </div>
-
-                                    <button 
-                                        onClick={(e) => { 
-                                            e.preventDefault(); 
-                                            e.stopPropagation(); 
-                                            handleDeleteWallItem(item.id); 
-                                        }}
-                                        className={`absolute top-2 right-2 z-50 bg-red-600 text-white p-2 rounded-full hover:bg-red-700 transition transform hover:scale-110 cursor-pointer shadow-xl ${item.imageUrl ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'}`}
-                                        title="Delete Image"
-                                    >
-                                        <Trash2 size={14}/>
-                                    </button>
-                                </div>
-                            ))}
-                        </div>
-                     )}
-                </div>
-            </div>
-        )}
-
-        {/* FX Tab */}
-        {activeTab === 'animations' && (
-             <div className="max-w-6xl mx-auto space-y-12 animate-fade-in-up">
-                 <div className="flex items-center justify-between border-b border-white/10 pb-4">
-                    <h1 className="text-4xl font-display font-light text-white">Visual <span className="text-gray-500 italic">FX</span></h1>
-                    <button onClick={applyEffects} className="bg-white text-black px-6 py-3 text-xs font-bold uppercase tracking-widest hover:bg-gray-200 transition flex items-center gap-2"><Play size={14} fill="black" /> Apply To Live Site</button>
-                </div>
-                
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
-                    {/* Title FX Section */}
-                    <div className="space-y-6">
-                        <div className="flex justify-between items-center border-b border-white/10 pb-2">
-                             <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500">Global Title Animation</h3>
-                             <span className="text-[9px] uppercase tracking-widest text-green-500 flex items-center gap-1"><Zap size={10}/> Active: {TITLE_EFFECTS.find(e => e.id === currentEffects.title)?.name || 'None'}</span>
-                        </div>
-                        <div className="grid grid-cols-2 gap-3">
-                            {TITLE_EFFECTS.map(fx => (
-                                <button
-                                    key={fx.id}
-                                    onClick={() => setTempTitleFx(fx.id)}
-                                    className={`p-4 text-xs font-bold uppercase tracking-wider border transition-all relative overflow-hidden group text-left flex items-center justify-between ${
-                                        tempTitleFx === fx.id 
-                                        ? 'bg-white text-black border-white' 
-                                        : 'bg-black text-gray-400 border-white/10 hover:border-white/50'
-                                    }`}
-                                >
-                                    <span className="relative z-10">{fx.name}</span>
-                                    {tempTitleFx === fx.id && <Check size={12}/>}
-                                </button>
-                            ))}
-                        </div>
-                        <div className="mt-8 bg-black border border-white/20 p-8 text-center min-h-[150px] flex items-center justify-center relative overflow-hidden">
-                            <div className="absolute top-2 left-2 text-[9px] text-gray-600 uppercase tracking-widest">Preview Window</div>
-                            <div>
-                                <h1 className={`text-4xl font-display font-bold ${tempTitleFx}`}>
-                                    UNIVERSAL <br/> <span className="italic font-light">ORCHARD</span>
-                                </h1>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Wall FX Section */}
-                    <div className="space-y-6">
-                        <div className="flex justify-between items-center border-b border-white/10 pb-2">
-                             <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500">Infinite Wall Animation</h3>
-                             <span className="text-[9px] uppercase tracking-widest text-green-500 flex items-center gap-1"><Zap size={10}/> Active: {WALL_EFFECTS.find(e => e.id === currentEffects.wall)?.name || 'None'}</span>
-                        </div>
-
-                        {/* Speed Control */}
-                        <div className="bg-white/5 border border-white/10 p-6 space-y-4">
-                            <div className="flex justify-between items-center">
-                                <label className="text-xs font-bold uppercase tracking-widest text-gray-500 flex items-center gap-2"><Gauge size={14}/> Scroll Speed</label>
-                                <span className="text-xs font-mono text-white">{wallSpeed}s (Loop Duration)</span>
-                            </div>
-                            <input 
-                                type="range" 
-                                min="10" 
-                                max="120" 
-                                step="5"
-                                value={wallSpeed}
-                                onChange={(e) => setWallSpeed(parseInt(e.target.value))}
-                                className="w-full accent-white cursor-pointer h-1 bg-gray-700 rounded-lg appearance-none"
-                            />
-                            <div className="flex justify-between text-[9px] text-gray-500 uppercase tracking-widest">
-                                <span>Fast (10s)</span>
-                                <span>Slow (120s)</span>
-                            </div>
-                        </div>
-
-                        <div className="grid grid-cols-2 gap-3 max-h-[400px] overflow-y-auto no-scrollbar pr-2">
-                            {WALL_EFFECTS.map(fx => (
-                                <button
-                                    key={fx.id}
-                                    onClick={() => setTempWallFx(fx.id)}
-                                     className={`p-4 text-xs font-bold uppercase tracking-wider border transition-all text-left flex items-center justify-between ${
-                                        tempWallFx === fx.id 
-                                        ? 'bg-white text-black border-white' 
-                                        : 'bg-black text-gray-400 border-white/10 hover:border-white/50'
-                                    }`}
-                                >
-                                    {fx.name}
-                                    {tempWallFx === fx.id && <Check size={12}/>}
-                                </button>
-                            ))}
-                        </div>
-                        <div className="mt-8 bg-black border border-white/20 p-4 min-h-[250px] relative overflow-hidden flex items-center justify-center">
-                             <div className="absolute top-2 left-2 text-[9px] text-gray-600 uppercase tracking-widest z-10">Preview Window</div>
-                             <div className="w-48 h-64 bg-gray-900 relative">
-                                 <img 
-                                    src="https://picsum.photos/400/500?grayscale" 
-                                    className={`w-full h-full object-cover ${tempWallFx}`}
-                                    alt="Preview"
-                                 />
-                                 <div className="absolute bottom-0 left-0 w-full p-2 bg-black/50 backdrop-blur-sm text-center">
-                                     <span className="text-[10px] text-white uppercase tracking-widest">Effect: {WALL_EFFECTS.find(e => e.id === tempWallFx)?.name}</span>
-                                 </div>
-                             </div>
-                        </div>
-                    </div>
-                </div>
-             </div>
         )}
       </main>
     </div>

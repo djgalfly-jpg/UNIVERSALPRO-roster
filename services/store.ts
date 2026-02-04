@@ -1,4 +1,4 @@
-import { Artist, WallItem } from '../types';
+import { Artist, WallItem, ImpactStats } from '../types';
 import pool from './db';
 
 // Initial Mock Data - Latin Grammy Theme (Used for Seeding Artists ONLY)
@@ -26,7 +26,8 @@ const INITIAL_ARTISTS: Artist[] = [
     socialLinks: {
         instagram: { url: 'https://instagram.com', isActive: true },
         youtube: { url: 'https://youtube.com', isActive: true }
-    }
+    },
+    layoutOrder: ['traffic', 'bio', 'video', 'music', 'stats']
   }
 ];
 
@@ -115,7 +116,7 @@ export const checkDbConnection = async (): Promise<boolean> => {
     }
 }
 
-// --- Global Settings (Lock & SEO) ---
+// --- Global Settings (Lock & SEO & Impact Stats) ---
 
 export const getSiteLockStatus = async (): Promise<boolean> => {
     try {
@@ -165,6 +166,44 @@ export const saveSEOSettings = async (settings: SEOSettings): Promise<void> => {
         );
     } catch (e) {
         console.error("Error saving SEO", e);
+    }
+}
+
+// --- Impact Stats ---
+
+export const getImpactStats = async (): Promise<ImpactStats> => {
+    try {
+        const result = await pool.query("SELECT value FROM global_settings WHERE key = 'impact_stats'");
+        if (result.rows[0]?.value) {
+            return JSON.parse(result.rows[0].value);
+        }
+        // Default values
+        return {
+            produced: "500+",
+            promoted: "1.2K",
+            advised: "300",
+            lyrics: "5,000+",
+            audiovisual: "250"
+        };
+    } catch (e) {
+        return {
+            produced: "500+",
+            promoted: "1.2K",
+            advised: "300",
+            lyrics: "5,000+",
+            audiovisual: "250"
+        };
+    }
+}
+
+export const saveImpactStats = async (stats: ImpactStats): Promise<void> => {
+    try {
+        await pool.query(
+            "INSERT INTO global_settings (key, value) VALUES ('impact_stats', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
+            [JSON.stringify(stats)]
+        );
+    } catch (e) {
+        console.error("Error saving impact stats", e);
     }
 }
 
