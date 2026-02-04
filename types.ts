@@ -13,6 +13,19 @@ export interface Song {
   coverUrl: string;
 }
 
+export interface SocialLink {
+  url: string;
+  isActive: boolean;
+}
+
+export interface SocialLinks {
+  youtube?: SocialLink;
+  instagram?: SocialLink;
+  facebook?: SocialLink;
+  twitter?: SocialLink; // X
+  discord?: SocialLink;
+}
+
 export type ArtistStatus = 'active' | 'maintenance' | 'updating' | 'suspended' | 'unsigned' | 'editing';
 
 export interface Artist {
@@ -33,6 +46,7 @@ export interface Artist {
   visitCount?: number;
   visitorCountries?: string[];
   status: ArtistStatus;
+  socialLinks?: SocialLinks; // New field for detailed social management
 }
 
 export interface WallItem {

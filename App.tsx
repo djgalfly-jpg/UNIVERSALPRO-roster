@@ -5,7 +5,7 @@ import AdminDashboard from './components/AdminDashboard';
 import ArtistLandingPage from './components/ArtistLandingPage';
 import LiveAssistant from './components/LiveAssistant';
 import LoadingScreen from './components/LoadingScreen';
-import { initDB } from './services/store';
+import { initDB, getSEOSettings } from './services/store';
 
 // Error Boundary Component to catch crashes
 class ErrorBoundary extends React.Component<{children: React.ReactNode}, {hasError: boolean, error: Error | null}> {
@@ -46,6 +46,34 @@ const App: React.FC = () => {
   useEffect(() => {
     // Initialize Database on App Mount
     initDB();
+
+    // SEO Injection
+    const loadSEO = async () => {
+        const settings = await getSEOSettings();
+        if (settings) {
+            document.title = settings.title;
+            
+            // Inject Description
+            let metaDesc = document.querySelector('meta[name="description"]');
+            if (!metaDesc) {
+                metaDesc = document.createElement('meta');
+                metaDesc.setAttribute('name', 'description');
+                document.head.appendChild(metaDesc);
+            }
+            metaDesc.setAttribute('content', settings.description);
+
+            // Inject Keywords
+            let metaKeywords = document.querySelector('meta[name="keywords"]');
+            if (!metaKeywords) {
+                metaKeywords = document.createElement('meta');
+                metaKeywords.setAttribute('name', 'keywords');
+                document.head.appendChild(metaKeywords);
+            }
+            metaKeywords.setAttribute('content', settings.keywords);
+        }
+    };
+    loadSEO();
+
   }, []);
 
   return (

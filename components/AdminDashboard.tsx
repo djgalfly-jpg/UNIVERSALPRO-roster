@@ -1,9 +1,9 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Artist, WallItem, ArtistStatus } from '../types';
-import { getArtists, saveArtist, addToWall, convertDropboxLink, getVisualEffects, saveVisualEffects, deleteArtist, getWallItems, deleteWallItem, checkDbConnection } from '../services/store';
-import { searchArtistBio, editArtistImage } from '../services/geminiService';
+import { Artist, WallItem, ArtistStatus, SocialLinks } from '../types';
+import { getArtists, saveArtist, addToWall, convertDropboxLink, getVisualEffects, saveVisualEffects, deleteArtist, getWallItems, deleteWallItem, checkDbConnection, getSiteLockStatus, setSiteLockStatus, clearWall, getSEOSettings, saveSEOSettings, SEOSettings, hardResetWall } from '../services/store';
+import { searchArtistBio, editArtistImage, extractSpotifyPlaylistData, generateSiteSEO } from '../services/geminiService';
 import { Link } from 'react-router-dom';
-import { Camera, Wand2, Search, Link as LinkIcon, Upload, Music, Loader2, Sparkles, LayoutGrid, Image as ImageIcon, CheckCircle, BarChart3, Youtube, Instagram, Twitter, Copy, Check, Eye, Globe, Images, Monitor, Type, Save, Disc, FileText, Lock, AlertTriangle, Trash2, Settings, Power, RefreshCw, XCircle, AlertOctagon, Edit3, ArrowLeft, Database, Pencil } from 'lucide-react';
+import { Camera, Wand2, Search, Link as LinkIcon, Upload, Music, Loader2, Sparkles, LayoutGrid, Image as ImageIcon, CheckCircle, BarChart3, Youtube, Instagram, Twitter, Copy, Check, Eye, Globe, Images, Monitor, Type, Save, Disc, FileText, Lock, AlertTriangle, Trash2, Settings, Power, RefreshCw, XCircle, AlertOctagon, Edit3, ArrowLeft, Database, Pencil, Facebook, MessageCircle, Shield, Radio, ListPlus, Play, Key, SearchCode, Ghost, Zap, Gauge, MousePointerClick } from 'lucide-react';
 import ArtistLandingPage from './ArtistLandingPage';
 
 const AdminDashboard: React.FC = () => {
@@ -12,17 +12,25 @@ const AdminDashboard: React.FC = () => {
   const [passwordInput, setPasswordInput] = useState('');
   const [authError, setAuthError] = useState(false);
 
-  const [activeTab, setActiveTab] = useState<'create' | 'wall' | 'animations' | 'sites'>('create');
+  const [activeTab, setActiveTab] = useState<'create' | 'wall' | 'animations' | 'sites' | 'seo'>('create');
   const [artists, setArtists] = useState<Artist[]>([]);
   
-  // Database Status
+  // System Status
   const [dbStatus, setDbStatus] = useState<'checking' | 'connected' | 'error'>('checking');
+  const [isSiteLocked, setIsSiteLocked] = useState(false);
   
+  // SEO State
+  const [seoSettings, setSeoSettings] = useState<SEOSettings | null>(null);
+  const [isGeneratingSEO, setIsGeneratingSEO] = useState(false);
+  const [seoTitle, setSeoTitle] = useState('');
+  const [seoDesc, setSeoDesc] = useState('');
+  const [seoKeywords, setSeoKeywords] = useState('');
+
   // FX State
-  const [currentEffects, setCurrentEffects] = useState({ title: '', wall: '' });
-  const [targetFx, setTargetFx] = useState<'title' | 'wall'>('title'); 
+  const [currentEffects, setCurrentEffects] = useState({ title: '', wall: '', speed: 45 });
   const [tempTitleFx, setTempTitleFx] = useState('');
   const [tempWallFx, setTempWallFx] = useState('');
+  const [wallSpeed, setWallSpeed] = useState(45);
   
   // Artist Form State
   const [editingArtistId, setEditingArtistId] = useState<string | null>(null);
@@ -34,6 +42,15 @@ const AdminDashboard: React.FC = () => {
   const [spotifyId, setSpotifyId] = useState('');
   const [bookUrl, setBookUrl] = useState('');
   
+  // Social Media State
+  const [socials, setSocials] = useState<SocialLinks>({
+      youtube: { url: '', isActive: false },
+      instagram: { url: '', isActive: false },
+      facebook: { url: '', isActive: false },
+      twitter: { url: '', isActive: false },
+      discord: { url: '', isActive: false },
+  });
+
   // Gallery/Book State
   const [galleryInput, setGalleryInput] = useState('');
 
@@ -54,6 +71,10 @@ const AdminDashboard: React.FC = () => {
   const [dropboxLink, setDropboxLink] = useState('');
   const [existingWallItems, setExistingWallItems] = useState<WallItem[]>([]);
   
+  // Spotify Import State
+  const [spotifyPlaylistInput, setSpotifyPlaylistInput] = useState('https://open.spotify.com/playlist/37i9dQZEVXbNFJfN1Vw8d9');
+  const [isImporting, setIsImporting] = useState(false);
+  
   // AI States
   const [isGeneratingBio, setIsGeneratingBio] = useState(false);
   const [isEditingImage, setIsEditingImage] = useState(false);
@@ -67,6 +88,7 @@ const AdminDashboard: React.FC = () => {
       if (isAuthenticated) {
           loadData();
           verifyDb();
+          loadSystemSettings();
       }
   }, [isAuthenticated, activeTab]);
 
@@ -75,6 +97,25 @@ const AdminDashboard: React.FC = () => {
       const isConnected = await checkDbConnection();
       setDbStatus(isConnected ? 'connected' : 'error');
   }
+  
+  const loadSystemSettings = async () => {
+      const locked = await getSiteLockStatus();
+      setIsSiteLocked(locked);
+      
+      const seo = await getSEOSettings();
+      setSeoSettings(seo);
+      if (seo) {
+          setSeoTitle(seo.title || '');
+          setSeoDesc(seo.description || '');
+          setSeoKeywords(seo.keywords || '');
+      }
+  }
+
+  const toggleSiteLock = async () => {
+      const newState = !isSiteLocked;
+      setIsSiteLocked(newState);
+      await setSiteLockStatus(newState);
+  }
 
   const loadData = async () => {
       const fetchedArtists = await getArtists();
@@ -82,8 +123,11 @@ const AdminDashboard: React.FC = () => {
 
       const effects = await getVisualEffects();
       setCurrentEffects(effects);
-      if (!tempTitleFx) setTempTitleFx(effects.title);
-      if (!tempWallFx) setTempWallFx(effects.wall);
+      
+      // Sync temp state with live DB state only if we haven't touched them yet
+      if (!tempTitleFx && effects.title) setTempTitleFx(effects.title);
+      if (!tempWallFx && effects.wall) setTempWallFx(effects.wall);
+      setWallSpeed(effects.speed);
 
       if (activeTab === 'wall') {
           const wItems = await getWallItems();
@@ -161,6 +205,16 @@ const AdminDashboard: React.FC = () => {
       setSpotifyId(extractedId);
   }
 
+  const handleSocialChange = (platform: keyof SocialLinks, field: 'url' | 'isActive', value: any) => {
+      setSocials(prev => ({
+          ...prev,
+          [platform]: {
+              ...prev[platform],
+              [field]: value
+          }
+      }));
+  };
+
   const generateSlug = (artistName: string) => {
       return artistName
         .toLowerCase()
@@ -184,6 +238,19 @@ const AdminDashboard: React.FC = () => {
       setYoutubeSubs(artist.stats.youtubeSubscribers.toString());
       setInstaFollowers(artist.stats.instagramFollowers.toString());
       setTiktokFollowers(artist.stats.tiktokFollowers.toString());
+      
+      // Load Socials robustly
+      const defaultSocials: SocialLinks = {
+          youtube: { url: '', isActive: false },
+          instagram: { url: '', isActive: false },
+          facebook: { url: '', isActive: false },
+          twitter: { url: '', isActive: false },
+          discord: { url: '', isActive: false },
+      };
+      
+      // Merge with defaults to prevent crashes if key is missing
+      const mergedSocials = { ...defaultSocials, ...(artist.socialLinks || {}) };
+      setSocials(mergedSocials);
       
       setActiveTab('create');
       window.scrollTo({ top: 0, behavior: 'smooth' });
@@ -226,7 +293,8 @@ const AdminDashboard: React.FC = () => {
             instagramFollowers: parseInt(instaFollowers) || 0,
             tiktokFollowers: parseInt(tiktokFollowers) || 0
           },
-          topSongs: originalArtist ? originalArtist.topSongs : []
+          topSongs: originalArtist ? originalArtist.topSongs : [],
+          socialLinks: socials
       };
 
       setPreviewArtist(tempArtist);
@@ -264,14 +332,6 @@ const AdminDashboard: React.FC = () => {
       setPreviewArtist(null);
   };
 
-  const copyToClipboard = () => {
-      if (generatedPublicLink) {
-          navigator.clipboard.writeText(generatedPublicLink);
-          setJustCopied(true);
-          setTimeout(() => setJustCopied(false), 2000);
-      }
-  }
-
   const resetForm = () => {
       setEditingArtistId(null);
       setName('');
@@ -286,6 +346,13 @@ const AdminDashboard: React.FC = () => {
       setTiktokFollowers('');
       setGalleryInput('');
       setPhotoUrl('https://picsum.photos/800/800');
+      setSocials({
+        youtube: { url: '', isActive: false },
+        instagram: { url: '', isActive: false },
+        facebook: { url: '', isActive: false },
+        twitter: { url: '', isActive: false },
+        discord: { url: '', isActive: false },
+      });
       setGeneratedPublicLink(null);
       setPreviewArtist(null);
   }
@@ -311,10 +378,134 @@ const AdminDashboard: React.FC = () => {
 
   const handleDeleteWallItem = async (id: string) => {
       if(window.confirm('Remove this photo from the public wall?')) {
-          await deleteWallItem(id);
+          // Optimistic update: Remove from UI immediately for instant feedback
+          const previousItems = [...existingWallItems];
+          setExistingWallItems(prev => prev.filter(item => item.id !== id));
+
+          const success = await deleteWallItem(id);
+          if (!success) {
+            // Revert if failed
+            setExistingWallItems(previousItems);
+            alert("Failed to delete item from database. Please check connection.");
+          }
+      }
+  }
+
+  const handleClearWall = async () => {
+      if(window.confirm('NUCLEAR OPTION: This will drop the entire database table and recreate it. This fixes ALL ghost image issues. Are you sure?')) {
+          // Optimistic update
+          setExistingWallItems([]); 
+
+          const success = await hardResetWall();
+          if (success) {
+            alert("Wall database has been completely reset. The page will reload.");
+            window.location.reload();
+          } else {
+            alert("Reset failed. Check console.");
+          }
+      }
+  }
+
+  const handlePurgeGhosts = async () => {
+      if(window.confirm('Detect and remove all corrupted/empty items from the wall?')) {
+          const ghosts = existingWallItems.filter(i => !i.imageUrl || i.imageUrl === '' || !i.title);
+          
+          if(ghosts.length === 0) {
+              return alert("No corrupted items found to purge.");
+          }
+
+          let deletedCount = 0;
+          for(const g of ghosts) {
+              const success = await deleteWallItem(g.id);
+              if(success) deletedCount++;
+          }
+          
           const items = await getWallItems();
           setExistingWallItems(items);
+          alert(`Purged ${deletedCount} corrupted ghost items.`);
       }
+  }
+
+  const handleSpotifyImport = async () => {
+      if (!spotifyPlaylistInput) return alert("Please enter at least one Spotify URL");
+      
+      const urls = spotifyPlaylistInput.split('\n').map(u => u.trim()).filter(u => u.length > 0);
+      if (urls.length === 0) return alert("No valid URLs found");
+
+      setIsImporting(true);
+      try {
+          let totalAdded = 0;
+          
+          for (const url of urls) {
+              try {
+                  const tracks = await extractSpotifyPlaylistData(url);
+                  if (tracks.length > 0) {
+                      for (const track of tracks) {
+                          await addToWall({
+                              id: `wall-spotify-${Date.now()}-${Math.random()}`,
+                              type: 'single',
+                              title: track.title,
+                              subtitle: track.artist,
+                              imageUrl: track.imageUrl
+                          });
+                          totalAdded++;
+                      }
+                  }
+              } catch (err) {
+                  console.error(`Failed to import from ${url}`, err);
+              }
+          }
+
+          if (totalAdded > 0) {
+            const items = await getWallItems();
+            setExistingWallItems(items);
+            alert(`Successfully imported ${totalAdded} tracks from ${urls.length} playlist(s)!`);
+          } else {
+            alert("No tracks were extracted. Check the URLs or try again.");
+          }
+
+      } catch (e: any) {
+          alert(`Import process failed: ${e.message}`);
+      } finally {
+          setIsImporting(false);
+      }
+  }
+
+  // Auto SEO Logic
+  const handleAutoSEO = async () => {
+      setIsGeneratingSEO(true);
+      try {
+          // 1. Get all artist names
+          const allArtists = await getArtists();
+          const artistNames = allArtists.map(a => a.name);
+
+          // 2. Call AI
+          const seoData = await generateSiteSEO(artistNames);
+
+          // 3. Update State (Do not save yet, let user review)
+          setSeoTitle(seoData.title);
+          setSeoDesc(seoData.description);
+          setSeoKeywords(seoData.keywords);
+
+          alert("Google SEO Optimization Generated! Please review and save.");
+      } catch (e) {
+          alert("Failed to generate SEO configuration.");
+      } finally {
+          setIsGeneratingSEO(false);
+      }
+  }
+
+  const handleSaveManualSEO = async () => {
+      const newSettings: SEOSettings = {
+          title: seoTitle,
+          description: seoDesc,
+          keywords: seoKeywords,
+          lastUpdated: new Date().toISOString()
+      };
+      
+      await saveSEOSettings(newSettings);
+      setSeoSettings(newSettings);
+      alert("SEO Settings Saved Successfully!");
   }
 
   // Site Management Functions
@@ -333,19 +524,10 @@ const AdminDashboard: React.FC = () => {
       setArtists(updated);
   }
 
-  // FX Management
-  const selectEffect = (effectClass: string) => {
-      if (targetFx === 'title') {
-          setTempTitleFx(effectClass);
-      } else {
-          setTempWallFx(effectClass);
-      }
-  }
-
   const applyEffects = async () => {
-      await saveVisualEffects(tempTitleFx, tempWallFx);
-      setCurrentEffects({ title: tempTitleFx, wall: tempWallFx });
-      alert("Visual Effects Applied to Public Wall");
+      await saveVisualEffects(tempTitleFx, tempWallFx, wallSpeed);
+      setCurrentEffects({ title: tempTitleFx, wall: tempWallFx, speed: wallSpeed });
+      alert("Visual Effects & Speed Applied to Public Wall");
   }
 
   // Login Screen
@@ -392,57 +574,49 @@ const AdminDashboard: React.FC = () => {
       )
   }
 
-  const FX_LIST = [
-      { id: '', name: 'None' },
-      // Original List
+  const TITLE_EFFECTS = [
+      { id: '', name: 'No Effect' },
+      { id: 'anim-title-cinema', name: 'Cinema Tracking' },
+      { id: 'anim-title-shudder', name: 'Shudder' },
+      { id: 'anim-title-gradient-flow', name: 'Gradient Flow' },
+      { id: 'anim-title-3d-pop', name: '3D Pop' },
+      { id: 'anim-title-blur-out', name: 'Blur Out' },
+      { id: 'anim-title-squeeze', name: 'Squeeze' },
+      { id: 'anim-title-swing', name: 'Swing' },
+      { id: 'anim-title-elevator', name: 'Elevator' },
+      { id: 'anim-title-color-cycle', name: 'Color Cycle' },
+      { id: 'anim-title-mask-reveal', name: 'Mask Reveal' },
+      { id: 'anim-rainbow-text', name: 'Rainbow' },
+  ];
+
+  const WALL_EFFECTS = [
+      { id: '', name: 'No Effect' },
+      { id: 'anim-wall-breathing', name: 'Breathing' },
+      { id: 'anim-wall-kenburns', name: 'Ken Burns' },
+      { id: 'anim-wall-float', name: 'Float' },
+      { id: 'anim-wall-cyber-glitch', name: 'Cyber Glitch' },
+      { id: 'anim-wall-sepia-dream', name: 'Sepia Dream' },
+      { id: 'anim-wall-neon-border', name: 'Neon Border' },
+      { id: 'anim-wall-spin-slow', name: 'Spin Slow' },
+      { id: 'anim-wall-perspective-left', name: 'Perspective L' },
+      { id: 'anim-wall-perspective-right', name: 'Perspective R' },
+      { id: 'anim-wall-pulse-shock', name: 'Shockwave' },
+      { id: 'anim-wall-bw-flash', name: 'B&W Flash' },
+      { id: 'anim-wall-hue-trip', name: 'LSD Trip' },
+      { id: 'anim-wall-mirror-y', name: 'Upside Down' },
+      { id: 'anim-wall-shake-hard', name: 'Earthquake' },
+      { id: 'anim-wall-lens-flare', name: 'Lens Flare' },
+      { id: 'anim-wall-wobble-skew', name: 'Wobble Skew' },
+      { id: 'anim-wall-heartbeat', name: 'Heartbeat' },
+      { id: 'anim-wall-crt-flicker', name: 'CRT Flicker' },
+      { id: 'anim-wall-liquid-morph', name: 'Liquid Morph' },
+      { id: 'anim-wall-slide-glitch', name: 'Slide Glitch' },
+      { id: 'anim-wall-rotate-3d', name: '3D Rotate' },
+      // Legacy that works on walls
       { id: 'anim-pulse-glow', name: 'Pulse Glow' },
       { id: 'anim-glitch', name: 'Glitch' },
-      { id: 'anim-neon', name: 'Neon Flicker' },
-      { id: 'anim-rainbow-text', name: 'Rainbow' },
       { id: 'anim-liquid-metal', name: 'Liquid Metal' },
-      { id: 'anim-wobble', name: 'Wobble' },
-      { id: 'anim-hue-cycle', name: 'Hue Cycle' },
-      { id: 'anim-blur-in', name: 'Blur Pulse' },
-      { id: 'anim-scanline', name: 'Scanline' },
-      { id: 'anim-border-flash', name: 'Flash Border' },
-      { id: 'anim-mirror', name: 'Mirror' },
       { id: 'anim-invert', name: 'Invert' },
-      { id: 'anim-sepia', name: 'Sepia Old' },
-      { id: 'anim-ghost', name: 'Ghosting' },
-      { id: 'anim-jiggle', name: 'Jiggle' },
-      // New Title Effects
-      { id: 'anim-title-cinema', name: 'Title: Cinema' },
-      { id: 'anim-title-shudder', name: 'Title: Shudder' },
-      { id: 'anim-title-gradient-flow', name: 'Title: Flow' },
-      { id: 'anim-title-3d-pop', name: 'Title: 3D Pop' },
-      { id: 'anim-title-blur-out', name: 'Title: Blur Out' },
-      { id: 'anim-title-squeeze', name: 'Title: Squeeze' },
-      { id: 'anim-title-swing', name: 'Title: Swing' },
-      { id: 'anim-title-elevator', name: 'Title: Elevator' },
-      { id: 'anim-title-color-cycle', name: 'Title: Colors' },
-      { id: 'anim-title-mask-reveal', name: 'Title: Reveal' },
-      // New Wall Effects
-      { id: 'anim-wall-breathing', name: 'Wall: Breathing' },
-      { id: 'anim-wall-kenburns', name: 'Wall: Ken Burns' },
-      { id: 'anim-wall-float', name: 'Wall: Float' },
-      { id: 'anim-wall-cyber-glitch', name: 'Wall: Cyber' },
-      { id: 'anim-wall-sepia-dream', name: 'Wall: Sepia' },
-      { id: 'anim-wall-neon-border', name: 'Wall: Neon' },
-      { id: 'anim-wall-spin-slow', name: 'Wall: Spin' },
-      { id: 'anim-wall-perspective-left', name: 'Wall: 3D Left' },
-      { id: 'anim-wall-perspective-right', name: 'Wall: 3D Right' },
-      { id: 'anim-wall-pulse-shock', name: 'Wall: Shockwave' },
-      { id: 'anim-wall-bw-flash', name: 'Wall: Flash B&W' },
-      { id: 'anim-wall-hue-trip', name: 'Wall: LSD' },
-      { id: 'anim-wall-mirror-y', name: 'Wall: Upside Down' },
-      { id: 'anim-wall-shake-hard', name: 'Wall: Quake' },
-      { id: 'anim-wall-lens-flare', name: 'Wall: Flare' },
-      { id: 'anim-wall-wobble-skew', name: 'Wall: Skew' },
-      { id: 'anim-wall-heartbeat', name: 'Wall: Heartbeat' },
-      { id: 'anim-wall-crt-flicker', name: 'Wall: CRT' },
-      { id: 'anim-wall-liquid-morph', name: 'Wall: Liquid' },
-      { id: 'anim-wall-slide-glitch', name: 'Wall: Slider' },
-      { id: 'anim-wall-rotate-3d', name: 'Wall: 3D Spin' },
   ];
 
   // --- RENDER PREVIEW MODE ---
@@ -496,7 +670,7 @@ const AdminDashboard: React.FC = () => {
                 onClick={() => { setActiveTab('create'); resetForm(); }}
                 className={`w-full text-left p-3 rounded-sm flex items-center gap-3 transition-all ${activeTab === 'create' ? 'bg-white text-black font-bold' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
             >
-                <Music size={18} /> New Artist Page
+                <Music size={18} /> New Artist Space
             </button>
             
             <button 
@@ -520,6 +694,13 @@ const AdminDashboard: React.FC = () => {
                 <Sparkles size={18} /> Visual FX
             </button>
 
+             <button 
+                onClick={() => setActiveTab('seo')}
+                className={`w-full text-left p-3 rounded-sm flex items-center gap-3 transition-all ${activeTab === 'seo' ? 'bg-white text-black font-bold' : 'text-gray-400 hover:text-white hover:bg-white/5'}`}
+            >
+                <SearchCode size={18} /> Google SEO
+            </button>
+
             <Link to="/" className="w-full text-left p-3 rounded-sm flex items-center gap-3 text-gray-400 hover:text-white hover:bg-white/5 mt-auto">
                 <LayoutGrid size={18} /> View Public Wall
             </Link>
@@ -528,12 +709,23 @@ const AdminDashboard: React.FC = () => {
 
         <div className="space-y-4">
              {/* DB Status Indicator */}
-            <div className="border-t border-white/10 pt-4">
+            <div className="border-t border-white/10 pt-4 space-y-4">
                 <div className="flex items-center gap-3 text-xs uppercase tracking-widest">
                     <div className={`w-2 h-2 rounded-full ${dbStatus === 'connected' ? 'bg-green-500 shadow-[0_0_5px_#0f0]' : dbStatus === 'error' ? 'bg-red-500' : 'bg-yellow-500 animate-pulse'}`}></div>
                     <span className={dbStatus === 'connected' ? 'text-white' : 'text-gray-500'}>
                         {dbStatus === 'connected' ? 'DB Connected' : dbStatus === 'checking' ? 'Checking DB...' : 'DB Offline'}
                     </span>
+                </div>
+                
+                {/* Global Lock Switch */}
+                <div className="flex items-center justify-between">
+                    <span className="text-xs uppercase tracking-widest text-gray-400 flex items-center gap-2"><Lock size={12}/> Public Lock</span>
+                    <button 
+                        onClick={toggleSiteLock}
+                        className={`w-10 h-5 rounded-full relative transition-colors ${isSiteLocked ? 'bg-red-600' : 'bg-gray-700'}`}
+                    >
+                        <div className={`absolute top-1 w-3 h-3 bg-white rounded-full transition-all ${isSiteLocked ? 'left-6' : 'left-1'}`}></div>
+                    </button>
                 </div>
             </div>
 
@@ -546,7 +738,7 @@ const AdminDashboard: React.FC = () => {
       {/* Main Content */}
       <main className="flex-1 p-8 md:p-12 overflow-y-auto h-screen bg-[#050505]">
         
-        {/* Manage Sites Tab (New) */}
+        {/* Manage Sites Tab */}
         {activeTab === 'sites' && (
             <div className="max-w-6xl mx-auto space-y-8 animate-fade-in-up">
                 <h1 className="text-4xl font-display font-light text-white border-b border-white/10 pb-4">Manage <span className="text-gray-500 italic">Websites</span></h1>
@@ -672,34 +864,6 @@ const AdminDashboard: React.FC = () => {
                     )}
                 </div>
             </div>
-
-            {generatedPublicLink && !editingArtistId && (
-                <div className="bg-green-500/10 border border-green-500/50 p-6 rounded-sm flex flex-col md:flex-row items-center justify-between gap-6 animate-pulse-glow">
-                    <div className="space-y-1">
-                        <h3 className="text-green-400 font-bold uppercase tracking-widest text-sm flex items-center gap-2">
-                            <CheckCircle size={16}/> Landing Page Created Successfully
-                        </h3>
-                        <p className="text-xs text-gray-400">The artist has been added to the public roster.</p>
-                    </div>
-                    <div className="flex items-center gap-2 w-full md:w-auto">
-                        <input 
-                            readOnly 
-                            value={generatedPublicLink} 
-                            className="bg-black border border-white/10 p-3 text-xs text-gray-300 w-full md:w-80 outline-none select-all font-mono"
-                        />
-                        <button 
-                            onClick={copyToClipboard}
-                            className="bg-white text-black p-3 hover:bg-gray-200 transition flex items-center gap-2 uppercase font-bold text-xs whitespace-nowrap"
-                        >
-                            {justCopied ? <Check size={14}/> : <Copy size={14}/>}
-                            {justCopied ? 'Copied' : 'Copy Link'}
-                        </button>
-                    </div>
-                    <Link to={generatedPublicLink.replace(window.location.origin + window.location.pathname + '#', '')} target="_blank" className="text-xs uppercase underline hover:text-white text-gray-400">
-                        Preview Page
-                    </Link>
-                </div>
-            )}
             
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-12">
               
@@ -746,9 +910,8 @@ const AdminDashboard: React.FC = () => {
                         </div>
                     </div>
                 </section>
-
-                {/* 2. Discography & Media - NEW SECTION */}
-                <section className="bg-white/5 border border-white/10 p-6 space-y-6">
+                {/* ...Rest of create sections... */}
+                 <section className="bg-white/5 border border-white/10 p-6 space-y-6">
                      <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-white flex items-center gap-2">
                         <Disc size={14} className="text-green-500 animate-spin-slow"/> Discography & Media
                     </h3>
@@ -767,7 +930,6 @@ const AdminDashboard: React.FC = () => {
                                 />
                                 {spotifyId && <span className="absolute right-3 top-3 text-[10px] text-green-500 font-bold uppercase tracking-wider flex items-center gap-1"><Check size={10}/> Linked</span>}
                             </div>
-                            <p className="text-[9px] text-gray-500">Paste the full Spotify Artist URL. We will automatically index their full discography.</p>
                         </div>
 
                         <div className="space-y-2">
@@ -780,7 +942,6 @@ const AdminDashboard: React.FC = () => {
                                 value={bookUrl} 
                                 onChange={e => setBookUrl(e.target.value)} 
                             />
-                            <p className="text-[9px] text-gray-500">Provide the Dropbox link for the artist's PDF Book/Presentation.</p>
                         </div>
 
                          <div className="space-y-2">
@@ -793,12 +954,50 @@ const AdminDashboard: React.FC = () => {
                                 value={ytId} 
                                 onChange={e => setYtId(e.target.value)} 
                             />
-                            <p className="text-[9px] text-gray-500">The video ID from the YouTube watch URL.</p>
                         </div>
                     </div>
                 </section>
+                
+                <section className="bg-white/5 border border-white/10 p-6 space-y-6">
+                    <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-white flex items-center gap-2">
+                        <Globe size={14} className="text-blue-500"/> Social Media Hub
+                    </h3>
+                    
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        {[
+                            { id: 'youtube', icon: Youtube, label: 'YouTube' },
+                            { id: 'instagram', icon: Instagram, label: 'Instagram' },
+                            { id: 'facebook', icon: Facebook, label: 'Facebook' },
+                            { id: 'twitter', icon: Twitter, label: 'X (Twitter)' },
+                            { id: 'discord', icon: MessageCircle, label: 'Discord' },
+                        ].map((platform) => {
+                            const pKey = platform.id as keyof SocialLinks;
+                            return (
+                                <div key={platform.id} className="bg-black border border-white/10 p-3 flex items-center gap-3">
+                                    <platform.icon size={16} className="text-gray-400"/>
+                                    <div className="flex-1">
+                                        <input 
+                                            className="w-full bg-transparent text-xs text-white outline-none placeholder-gray-700"
+                                            placeholder={`${platform.label} URL`}
+                                            value={socials[pKey]?.url || ''}
+                                            onChange={(e) => handleSocialChange(pKey, 'url', e.target.value)}
+                                        />
+                                    </div>
+                                    <div className="border-l border-white/10 pl-3">
+                                        <input 
+                                            type="checkbox"
+                                            checked={socials[pKey]?.isActive || false}
+                                            onChange={(e) => handleSocialChange(pKey, 'isActive', e.target.checked)}
+                                            className="w-4 h-4 accent-green-500 cursor-pointer"
+                                            title="Show on profile"
+                                        />
+                                    </div>
+                                </div>
+                            )
+                        })}
+                    </div>
+                </section>
 
-                {/* 3. Live Analytics */}
                 <section className="bg-white/5 border border-white/10 p-6 space-y-6">
                     <h3 className="text-xs font-bold uppercase tracking-[0.2em] text-white flex items-center gap-2">
                         <BarChart3 size={14} className="text-white"/> Real-Time Analytics Input
@@ -912,23 +1111,164 @@ const AdminDashboard: React.FC = () => {
                     </div>
                 </div>
 
-                <button onClick={handlePreviewArtist} className="w-full bg-white text-black text-lg py-5 font-bold hover:bg-gray-200 transition uppercase tracking-widest mt-8 flex items-center justify-center gap-2">
-                   <Eye size={20}/> {editingArtistId ? 'Update & Preview' : 'Publish to Go (Preview)'}
-                </button>
+                <div className="flex flex-col gap-4 mt-8">
+                     <button onClick={handlePreviewArtist} className="w-full bg-white text-black text-lg py-5 font-bold hover:bg-gray-200 transition uppercase tracking-widest flex items-center justify-center gap-2">
+                        <Eye size={20}/> {editingArtistId ? 'Update & Preview' : 'Preview Profile'}
+                    </button>
+                    <button onClick={resetForm} className="w-full bg-transparent border border-white/20 text-gray-500 py-3 text-xs hover:text-white hover:border-white transition uppercase tracking-widest">
+                        Clear Form
+                    </button>
+                </div>
               </div>
             </div>
           </div>
         )}
 
+        {/* SEO AUTO ENGINE */}
+        {activeTab === 'seo' && (
+            <div className="max-w-4xl mx-auto space-y-8 animate-fade-in-up">
+                 <h1 className="text-4xl font-display font-light text-white border-b border-white/10 pb-4">Search <span className="text-gray-500 italic">Engine Optimization</span></h1>
+                 
+                 {/* 1. Generator Control */}
+                 <div className="bg-green-900/10 border border-green-500/20 p-8 space-y-6 relative overflow-hidden">
+                     <div className="flex flex-col md:flex-row justify-between items-start md:items-center gap-4 relative z-10">
+                        <div>
+                             <h3 className="text-lg font-bold uppercase tracking-widest text-green-400 flex items-center gap-2">
+                                <SearchCode size={20}/> Automatic Indexing Engine
+                             </h3>
+                             <p className="text-xs text-gray-400 mt-2 max-w-lg">
+                                This tool uses AI to analyze your entire artist roster and generate the perfect metadata. Click generate to populate the fields below, then review and save.
+                             </p>
+                        </div>
+                        <button 
+                            onClick={handleAutoSEO}
+                            disabled={isGeneratingSEO}
+                            className="bg-green-600 hover:bg-green-500 text-white px-8 py-4 font-bold uppercase tracking-widest text-xs flex items-center gap-2 disabled:opacity-50 transition shadow-[0_0_20px_rgba(34,197,94,0.3)]"
+                        >
+                            {isGeneratingSEO ? <Loader2 className="animate-spin" size={16}/> : <Sparkles size={16}/>}
+                            {isGeneratingSEO ? 'AI IS OPTIMIZING...' : 'GENERATE AUTO-SEO'}
+                        </button>
+                     </div>
+                 </div>
+
+                 {/* 2. Manual Editing Form */}
+                 <div className="bg-white/5 border border-white/10 p-8 space-y-6">
+                     <div className="flex items-center justify-between border-b border-white/10 pb-4 mb-6">
+                         <h3 className="text-xs font-bold uppercase tracking-widest text-white flex items-center gap-2">
+                             <MousePointerClick size={14}/> Site Metadata Control
+                         </h3>
+                         {seoSettings?.lastUpdated && (
+                             <span className="text-[10px] text-gray-500 uppercase tracking-widest">Last Updated: {new Date(seoSettings.lastUpdated).toLocaleDateString()}</span>
+                         )}
+                     </div>
+
+                     <div className="space-y-6">
+                        <div className="space-y-2">
+                            <label className="text-[10px] uppercase tracking-widest text-gray-500">Page Title (Browser Tab)</label>
+                            <input 
+                                className="w-full bg-black border border-white/20 p-3 text-white focus:border-green-500 outline-none transition-colors"
+                                value={seoTitle}
+                                onChange={(e) => setSeoTitle(e.target.value)}
+                                placeholder="e.g. Universal Orchard Music | Global Icons"
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] uppercase tracking-widest text-gray-500">Meta Description (Google Snippet)</label>
+                            <textarea 
+                                className="w-full bg-black border border-white/20 p-3 text-white focus:border-green-500 outline-none h-24"
+                                value={seoDesc}
+                                onChange={(e) => setSeoDesc(e.target.value)}
+                                placeholder="A brief description of the label and roster..."
+                            />
+                        </div>
+
+                        <div className="space-y-2">
+                            <label className="text-[10px] uppercase tracking-widest text-gray-500">Meta Keywords (Comma Separated)</label>
+                            <textarea 
+                                className="w-full bg-black border border-white/20 p-3 text-white focus:border-green-500 outline-none h-24 font-mono text-xs"
+                                value={seoKeywords}
+                                onChange={(e) => setSeoKeywords(e.target.value)}
+                                placeholder="music, latin, pop, flamenco, urban..."
+                            />
+                        </div>
+
+                        <button 
+                            onClick={handleSaveManualSEO}
+                            className="w-full bg-white text-black p-4 font-bold uppercase tracking-widest hover:bg-gray-200 transition flex justify-center items-center gap-2"
+                        >
+                            <Save size={16}/> Save SEO Configuration
+                        </button>
+                     </div>
+                 </div>
+            </div>
+        )}
+
         {/* Wall Photos Tab */}
         {activeTab === 'wall' && (
             <div className="max-w-4xl mx-auto space-y-8 animate-fade-in-up">
-                <h1 className="text-4xl font-display font-light text-white border-b border-white/10 pb-4">Wall <span className="text-gray-500 italic">Visuals</span></h1>
+                <div className="flex flex-col md:flex-row justify-between items-end border-b border-white/10 pb-4 gap-4">
+                     <div>
+                        <h1 className="text-4xl font-display font-light text-white">Wall <span className="text-gray-500 italic">Visuals</span></h1>
+                        <p className="text-xs text-gray-500 mt-2">Manage the infinite scroll wall content.</p>
+                     </div>
+                     
+                     <div className="flex items-center gap-3">
+                         <button 
+                            onClick={handlePurgeGhosts} 
+                            className="bg-orange-500/10 border border-orange-500/50 text-orange-500 hover:bg-orange-500 hover:text-white px-4 py-2 text-[10px] uppercase tracking-widest flex items-center gap-2 transition-all"
+                        >
+                            <Ghost size={14}/> Purge Broken
+                        </button>
+                        <button 
+                            onClick={handleClearWall} 
+                            className="bg-red-600 text-white hover:bg-red-700 px-6 py-2 text-[10px] uppercase tracking-widest font-bold flex items-center gap-2 transition-all shadow-[0_0_15px_rgba(220,38,38,0.5)]"
+                        >
+                            <Trash2 size={14}/> ERASE ALL IMAGES
+                        </button>
+                     </div>
+                </div>
                 
-                {/* Add New Section */}
+                {/* AI Import Section - NEW */}
+                <div className="bg-green-900/20 border border-green-500/30 p-8 space-y-6 relative overflow-hidden">
+                    <div className="absolute top-0 right-0 p-4 opacity-10"><Music size={100} /></div>
+                    
+                    <div className="flex items-start justify-between relative z-10">
+                        <div>
+                            <h3 className="text-xs font-bold uppercase tracking-widest text-green-400 flex items-center gap-2 relative z-10">
+                                <Sparkles size={14}/> AI Spotify Batch Importer
+                            </h3>
+                            <p className="text-[10px] text-gray-400 max-w-md mt-1">
+                                Paste multiple Spotify Playlist URLs (one per line). The AI will extract tracklists and find high-quality covers.
+                            </p>
+                        </div>
+                    </div>
+
+                    <div className="flex flex-col gap-4 relative z-10 mt-4">
+                         <div className="flex-1 space-y-2">
+                            <label className="text-[9px] uppercase tracking-widest text-gray-500 flex items-center gap-2"><ListPlus size={10}/> Playlist URLs (One per line)</label>
+                            <textarea 
+                                className="w-full bg-black border border-green-500/30 p-3 text-white text-xs focus:border-green-500 outline-none h-32 font-mono leading-relaxed"
+                                value={spotifyPlaylistInput}
+                                onChange={(e) => setSpotifyPlaylistInput(e.target.value)}
+                                placeholder="https://open.spotify.com/playlist/..."
+                            />
+                         </div>
+                         <button 
+                            onClick={handleSpotifyImport}
+                            disabled={isImporting}
+                            className="bg-green-600 text-white p-4 font-bold uppercase tracking-widest hover:bg-green-500 transition text-xs flex items-center justify-center gap-2 disabled:opacity-50 w-full"
+                         >
+                             {isImporting ? <Loader2 className="animate-spin" size={14}/> : <Radio size={14}/>}
+                             {isImporting ? 'Processing Batch Import...' : 'Run Batch Import'}
+                         </button>
+                    </div>
+                </div>
+
+                {/* Add New Manual Section */}
                 <div className="bg-white/5 p-8 border border-white/10 space-y-6">
                     <h3 className="text-xs font-bold uppercase tracking-widest text-white flex items-center gap-2">
-                         <Upload size={14}/> Add New Item
+                         <Upload size={14}/> Add Manual Item
                     </h3>
                     <div className="space-y-2">
                         <label className="text-xs uppercase tracking-widest text-gray-500 flex items-center gap-2">
@@ -978,112 +1318,148 @@ const AdminDashboard: React.FC = () => {
                          <Monitor size={14}/> Manage Active Wall ({existingWallItems.length} items)
                      </h3>
                      
-                     <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-                         {existingWallItems.map(item => (
-                             <div key={item.id} className="group relative border border-white/10 bg-black aspect-square overflow-hidden">
-                                 <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition duration-500"/>
-                                 
-                                 <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition flex flex-col justify-end p-3">
-                                     <p className="text-xs font-bold truncate">{item.title}</p>
-                                     <p className="text-[9px] text-gray-400 uppercase tracking-widest truncate">{item.subtitle}</p>
-                                 </div>
+                     {existingWallItems.length === 0 ? (
+                         <div className="border border-white/10 border-dashed p-8 text-center text-gray-500 uppercase tracking-widest text-xs">
+                             Wall is currently empty. Upload images via Spotify Import or Manually.
+                         </div>
+                     ) : (
+                        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                            {existingWallItems.map(item => (
+                                <div key={item.id} className="group relative border border-white/10 bg-black aspect-square overflow-hidden hover:border-red-500/50 transition-colors">
+                                    {item.imageUrl ? (
+                                        <img src={item.imageUrl} alt={item.title} className="w-full h-full object-cover opacity-60 group-hover:opacity-100 transition duration-500"/>
+                                    ) : (
+                                        <div className="w-full h-full flex flex-col items-center justify-center text-red-500 p-4 text-center bg-red-900/10">
+                                            <AlertTriangle size={24} className="mb-2"/>
+                                            <span className="text-[9px] uppercase tracking-widest font-bold">Corrupted Data</span>
+                                        </div>
+                                    )}
+                                    
+                                    <div className="absolute inset-0 bg-gradient-to-t from-black via-transparent to-transparent opacity-0 group-hover:opacity-100 transition flex flex-col justify-end p-3 pointer-events-none">
+                                        <p className="text-xs font-bold truncate text-white">{item.title || 'Untitled'}</p>
+                                        <p className="text-[9px] text-gray-400 uppercase tracking-widest truncate">{item.subtitle}</p>
+                                    </div>
 
-                                 <button 
-                                     onClick={() => handleDeleteWallItem(item.id)}
-                                     className="absolute top-2 right-2 bg-red-600 text-white p-2 rounded-full opacity-0 group-hover:opacity-100 hover:bg-red-700 transition transform hover:scale-110"
-                                     title="Delete Image"
-                                 >
-                                     <Trash2 size={12}/>
-                                 </button>
-                             </div>
-                         ))}
-                     </div>
+                                    <button 
+                                        onClick={(e) => { 
+                                            e.preventDefault(); 
+                                            e.stopPropagation(); 
+                                            handleDeleteWallItem(item.id); 
+                                        }}
+                                        className={`absolute top-2 right-2 z-50 bg-red-600 text-white p-2 rounded-full hover:bg-red-700 transition transform hover:scale-110 cursor-pointer shadow-xl ${item.imageUrl ? 'opacity-0 group-hover:opacity-100' : 'opacity-100'}`}
+                                        title="Delete Image"
+                                    >
+                                        <Trash2 size={14}/>
+                                    </button>
+                                </div>
+                            ))}
+                        </div>
+                     )}
                 </div>
             </div>
         )}
-        
-        {/* Animations Tab - UPDATED */}
+
+        {/* FX Tab */}
         {activeTab === 'animations' && (
-          <div className="max-w-6xl mx-auto animate-fade-in-up relative h-full flex flex-col">
-             <div className="flex justify-between items-end border-b border-white/10 pb-4 mb-8">
-                 <div>
-                    <h1 className="text-4xl font-display font-light text-white">Visual FX <span className="text-gray-500 italic">Engine</span></h1>
-                    <p className="text-gray-500 text-sm mt-2">Configure separate effects for the main title and the wall visuals.</p>
-                 </div>
-                 <button 
-                    onClick={applyEffects}
-                    className="bg-white text-black px-8 py-3 font-bold uppercase tracking-widest flex items-center gap-2 hover:bg-green-400 hover:scale-105 transition-all shadow-[0_0_20px_rgba(255,255,255,0.3)]"
-                 >
-                    <Save size={18}/> Apply All Effects
-                 </button>
-             </div>
-             
-             {/* Target Selector */}
-             <div className="flex gap-4 mb-8">
-                <button 
-                    onClick={() => setTargetFx('title')}
-                    className={`flex-1 p-6 border flex items-center justify-between transition-all group ${targetFx === 'title' ? 'bg-white text-black border-white' : 'bg-black text-gray-400 border-white/10 hover:border-white/50'}`}
-                >
-                    <div className="flex items-center gap-4">
-                        <Type size={24} />
-                        <div className="text-left">
-                            <div className="text-xs uppercase tracking-widest font-bold">Edit Title FX</div>
-                            <div className="text-sm opacity-60">Main Header Text</div>
+             <div className="max-w-6xl mx-auto space-y-12 animate-fade-in-up">
+                 <div className="flex items-center justify-between border-b border-white/10 pb-4">
+                    <h1 className="text-4xl font-display font-light text-white">Visual <span className="text-gray-500 italic">FX</span></h1>
+                    <button onClick={applyEffects} className="bg-white text-black px-6 py-3 text-xs font-bold uppercase tracking-widest hover:bg-gray-200 transition flex items-center gap-2"><Play size={14} fill="black" /> Apply To Live Site</button>
+                </div>
+                
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-12">
+                    {/* Title FX Section */}
+                    <div className="space-y-6">
+                        <div className="flex justify-between items-center border-b border-white/10 pb-2">
+                             <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500">Global Title Animation</h3>
+                             <span className="text-[9px] uppercase tracking-widest text-green-500 flex items-center gap-1"><Zap size={10}/> Active: {TITLE_EFFECTS.find(e => e.id === currentEffects.title)?.name || 'None'}</span>
                         </div>
-                    </div>
-                    <div className="text-xs font-mono uppercase border px-2 py-1 rounded-sm border-current opacity-70">
-                        {tempTitleFx ? tempTitleFx.replace('anim-', '') : 'None'}
-                    </div>
-                </button>
-
-                <button 
-                    onClick={() => setTargetFx('wall')}
-                    className={`flex-1 p-6 border flex items-center justify-between transition-all group ${targetFx === 'wall' ? 'bg-white text-black border-white' : 'bg-black text-gray-400 border-white/10 hover:border-white/50'}`}
-                >
-                     <div className="flex items-center gap-4">
-                        <Monitor size={24} />
-                        <div className="text-left">
-                            <div className="text-xs uppercase tracking-widest font-bold">Edit Wall Photos FX</div>
-                            <div className="text-sm opacity-60">Infinite Grid Images</div>
+                        <div className="grid grid-cols-2 gap-3">
+                            {TITLE_EFFECTS.map(fx => (
+                                <button
+                                    key={fx.id}
+                                    onClick={() => setTempTitleFx(fx.id)}
+                                    className={`p-4 text-xs font-bold uppercase tracking-wider border transition-all relative overflow-hidden group text-left flex items-center justify-between ${
+                                        tempTitleFx === fx.id 
+                                        ? 'bg-white text-black border-white' 
+                                        : 'bg-black text-gray-400 border-white/10 hover:border-white/50'
+                                    }`}
+                                >
+                                    <span className="relative z-10">{fx.name}</span>
+                                    {tempTitleFx === fx.id && <Check size={12}/>}
+                                </button>
+                            ))}
                         </div>
-                    </div>
-                    <div className="text-xs font-mono uppercase border px-2 py-1 rounded-sm border-current opacity-70">
-                        {tempWallFx ? tempWallFx.replace('anim-', '') : 'None'}
-                    </div>
-                </button>
-             </div>
-
-             <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-6 overflow-y-auto pb-12">
-                {FX_LIST.map((fx) => {
-                    const isSelected = targetFx === 'title' ? tempTitleFx === fx.id : tempWallFx === fx.id;
-                    
-                    return (
-                        <div 
-                            key={fx.id}
-                            onClick={() => selectEffect(fx.id)} 
-                            className={`aspect-square bg-gray-900 border cursor-pointer hover:bg-gray-800 transition flex flex-col items-center justify-center p-4 gap-4 relative overflow-hidden group ${isSelected ? 'border-white ring-2 ring-white/50 ring-offset-2 ring-offset-black' : 'border-white/10'}`}
-                        >
-                            {/* Visual Preview of Effect */}
-                            {fx.id !== '' && (
-                                <div className={`text-2xl font-display font-bold text-white/80 ${fx.id}`}>
-                                    Aa
-                                </div>
-                            )}
-                            
-                            <div className="flex items-center gap-2 z-10">
-                                <span className="text-xs text-gray-500 uppercase tracking-widest group-hover:text-white transition text-center">{fx.name}</span>
+                        <div className="mt-8 bg-black border border-white/20 p-8 text-center min-h-[150px] flex items-center justify-center relative overflow-hidden">
+                            <div className="absolute top-2 left-2 text-[9px] text-gray-600 uppercase tracking-widest">Preview Window</div>
+                            <div>
+                                <h1 className={`text-4xl font-display font-bold ${tempTitleFx}`}>
+                                    UNIVERSAL <br/> <span className="italic font-light">ORCHARD</span>
+                                </h1>
                             </div>
-                            
-                            {isSelected && (
-                                <div className="absolute top-2 right-2 text-green-500">
-                                    <CheckCircle size={16} />
-                                </div>
-                            )}
                         </div>
-                    );
-                })}
+                    </div>
+
+                    {/* Wall FX Section */}
+                    <div className="space-y-6">
+                        <div className="flex justify-between items-center border-b border-white/10 pb-2">
+                             <h3 className="text-xs font-bold uppercase tracking-widest text-gray-500">Infinite Wall Animation</h3>
+                             <span className="text-[9px] uppercase tracking-widest text-green-500 flex items-center gap-1"><Zap size={10}/> Active: {WALL_EFFECTS.find(e => e.id === currentEffects.wall)?.name || 'None'}</span>
+                        </div>
+
+                        {/* Speed Control */}
+                        <div className="bg-white/5 border border-white/10 p-6 space-y-4">
+                            <div className="flex justify-between items-center">
+                                <label className="text-xs font-bold uppercase tracking-widest text-gray-500 flex items-center gap-2"><Gauge size={14}/> Scroll Speed</label>
+                                <span className="text-xs font-mono text-white">{wallSpeed}s (Loop Duration)</span>
+                            </div>
+                            <input 
+                                type="range" 
+                                min="10" 
+                                max="120" 
+                                step="5"
+                                value={wallSpeed}
+                                onChange={(e) => setWallSpeed(parseInt(e.target.value))}
+                                className="w-full accent-white cursor-pointer h-1 bg-gray-700 rounded-lg appearance-none"
+                            />
+                            <div className="flex justify-between text-[9px] text-gray-500 uppercase tracking-widest">
+                                <span>Fast (10s)</span>
+                                <span>Slow (120s)</span>
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 max-h-[400px] overflow-y-auto no-scrollbar pr-2">
+                            {WALL_EFFECTS.map(fx => (
+                                <button
+                                    key={fx.id}
+                                    onClick={() => setTempWallFx(fx.id)}
+                                     className={`p-4 text-xs font-bold uppercase tracking-wider border transition-all text-left flex items-center justify-between ${
+                                        tempWallFx === fx.id 
+                                        ? 'bg-white text-black border-white' 
+                                        : 'bg-black text-gray-400 border-white/10 hover:border-white/50'
+                                    }`}
+                                >
+                                    {fx.name}
+                                    {tempWallFx === fx.id && <Check size={12}/>}
+                                </button>
+                            ))}
+                        </div>
+                        <div className="mt-8 bg-black border border-white/20 p-4 min-h-[250px] relative overflow-hidden flex items-center justify-center">
+                             <div className="absolute top-2 left-2 text-[9px] text-gray-600 uppercase tracking-widest z-10">Preview Window</div>
+                             <div className="w-48 h-64 bg-gray-900 relative">
+                                 <img 
+                                    src="https://picsum.photos/400/500?grayscale" 
+                                    className={`w-full h-full object-cover ${tempWallFx}`}
+                                    alt="Preview"
+                                 />
+                                 <div className="absolute bottom-0 left-0 w-full p-2 bg-black/50 backdrop-blur-sm text-center">
+                                     <span className="text-[10px] text-white uppercase tracking-widest">Effect: {WALL_EFFECTS.find(e => e.id === tempWallFx)?.name}</span>
+                                 </div>
+                             </div>
+                        </div>
+                    </div>
+                </div>
              </div>
-          </div>
         )}
       </main>
     </div>

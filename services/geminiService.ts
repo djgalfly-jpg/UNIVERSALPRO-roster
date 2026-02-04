@@ -37,6 +37,113 @@ export const searchArtistBio = async (artistName: string): Promise<string> => {
   }
 };
 
+// --- Auto SEO Generation ---
+export const generateSiteSEO = async (artistNames: string[]): Promise<{title: string, description: string, keywords: string}> => {
+    try {
+        const prompt = `
+            You are an expert SEO specialist for the Music Industry.
+            
+            Context: "Universal Orchard Music" is a record label platform featuring these artists: ${artistNames.join(', ')}.
+            
+            Task: Generate optimal metadata to get this site indexed by Google for music searches.
+            
+            Output strictly as JSON:
+            {
+                "title": "A catchy, keyword-rich title (max 60 chars)",
+                "description": "A compelling meta description including key artists and genre keywords (max 160 chars)",
+                "keywords": "Comma separated list of high-value keywords"
+            }
+        `;
+
+        const response = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json"
+            }
+        });
+
+        const text = response.text || "{}";
+        // Clean up markdown code blocks if present to ensure valid JSON parsing
+        const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        return JSON.parse(cleanJson);
+    } catch (e) {
+        console.error("SEO Gen Error", e);
+        return {
+            title: "Universal Orchard Music | Global Icons",
+            description: "The official roster of Universal Orchard Music.",
+            keywords: "music, label, orchard, universal"
+        };
+    }
+};
+
+// --- Spotify Extraction via AI + iTunes Fallback for Covers ---
+export const extractSpotifyPlaylistData = async (playlistUrl: string): Promise<Array<{title: string, artist: string, imageUrl: string}>> => {
+    try {
+        // Step 1: Use AI to get the Text Data (Song Titles and Artists) from the Playlist URL using Google Search
+        const prompt = `
+            Analyze this Spotify Playlist URL: ${playlistUrl}.
+            
+            Task:
+            1. Use Google Search to find the current tracklist of this playlist.
+            2. Extract the Top 25 song titles and their artist names.
+            
+            Output Format:
+            Return ONLY a valid JSON array. Do not wrap in markdown code blocks.
+            Structure: [{"title": "Song Name", "artist": "Artist Name"}]
+        `;
+
+        const response = await ai.models.generateContent({
+            model: "gemini-3-flash-preview",
+            contents: prompt,
+            config: {
+                tools: [{ googleSearch: {} }],
+                responseMimeType: "application/json"
+            },
+        });
+
+        const text = response.text || "[]";
+        const cleanJson = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        const tracks = JSON.parse(cleanJson);
+
+        // Step 2: Fetch High-Res Cover Art from iTunes API (More reliable than AI hallucinating image URLs)
+        const enhancedTracks = await Promise.all(tracks.map(async (track: {title: string, artist: string}) => {
+            try {
+                // Search iTunes for the track
+                const query = encodeURIComponent(`${track.title} ${track.artist}`);
+                const res = await fetch(`https://itunes.apple.com/search?term=${query}&media=music&entity=song&limit=1`);
+                const data = await res.json();
+
+                if (data.results && data.results.length > 0) {
+                    // Get artwork and upgrade resolution from 100x100 to 800x800
+                    const rawUrl = data.results[0].artworkUrl100;
+                    const highResUrl = rawUrl.replace('100x100bb', '800x800bb');
+                    return {
+                        title: track.title,
+                        artist: track.artist,
+                        imageUrl: highResUrl
+                    };
+                }
+            } catch (e) {
+                console.warn(`Could not fetch cover for ${track.title}`, e);
+            }
+            
+            // Fallback if iTunes fails: Use a generic sleek gradient or placeholder
+            return {
+                title: track.title,
+                artist: track.artist,
+                imageUrl: `https://ui-avatars.com/api/?name=${encodeURIComponent(track.artist)}+${encodeURIComponent(track.title)}&background=random&size=800` 
+            };
+        }));
+
+        return enhancedTracks;
+
+    } catch (error) {
+        console.error("Error extracting spotify data:", error);
+        throw new Error("Failed to extract playlist data. Please check the URL or try again.");
+    }
+}
+
 // --- Image Editing (Nano Banana) ---
 export const editArtistImage = async (
   base64Image: string, 

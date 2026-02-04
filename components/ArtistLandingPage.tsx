@@ -1,8 +1,8 @@
 import React, { useState, useEffect } from 'react';
 import { useParams } from 'react-router-dom';
-import { getArtistById, trackArtistVisit } from '../services/store';
+import { getArtistById, trackArtistVisit, getLiveAnalytics } from '../services/store';
 import { BarChart, Bar, XAxis, Tooltip, ResponsiveContainer, Cell } from 'recharts';
-import { Instagram, Youtube, Twitter, Music, Share2, Check, Download, Users, Globe, FileText, AlertTriangle, Hammer, RefreshCcw, Lock, Edit3 } from 'lucide-react';
+import { Instagram, Youtube, Twitter, Facebook, Music, Share2, Check, Download, Users, Globe, FileText, AlertTriangle, Hammer, RefreshCcw, Lock, Edit3, MessageCircle } from 'lucide-react';
 import { Artist } from '../types';
 
 interface Props {
@@ -40,7 +40,11 @@ const ArtistLandingPage: React.FC<Props> = ({ previewData }) => {
   // State for data
   const [artist, setArtist] = useState<Artist | null>(previewData || null);
   const [copied, setCopied] = useState(false);
-  const [onlineUsers, setOnlineUsers] = useState(Math.floor(Math.random() * 200) + 50);
+  
+  // Real-time analytics state
+  const [activeUsers, setActiveUsers] = useState(0);
+  const [activeCountries, setActiveCountries] = useState<string[]>([]);
+  
   const [loading, setLoading] = useState(!previewData);
 
   useEffect(() => {
@@ -65,14 +69,16 @@ const ArtistLandingPage: React.FC<Props> = ({ previewData }) => {
     loadArtist();
   }, [id, previewData]);
 
-  // Simulate online users fluctuation
+  // Live Users Polling
   useEffect(() => {
-      const interval = setInterval(() => {
-          setOnlineUsers(prev => {
-              const change = Math.floor(Math.random() * 10) - 5;
-              return Math.max(10, prev + change);
-          });
-      }, 5000);
+      const fetchLive = async () => {
+          const data = await getLiveAnalytics();
+          setActiveUsers(data.activeUsers);
+          setActiveCountries(data.countries);
+      };
+
+      fetchLive(); // Initial
+      const interval = setInterval(fetchLive, 5000); // Poll every 5s
       return () => clearInterval(interval);
   }, []);
 
@@ -288,10 +294,21 @@ const ArtistLandingPage: React.FC<Props> = ({ previewData }) => {
           <section>
              <h2 className="text-xs font-bold mb-8 uppercase tracking-[0.4em] text-white/40 border-b border-white/10 pb-4">Social Network</h2>
              <div className="grid grid-cols-4 gap-4">
-                <a href="#" className="aspect-square border border-white/20 flex items-center justify-center hover:bg-white hover:text-black transition duration-500 hover:scale-105"><Instagram size={20} strokeWidth={1.5}/></a>
-                <a href="#" className="aspect-square border border-white/20 flex items-center justify-center hover:bg-white hover:text-black transition duration-500 hover:scale-105"><Twitter size={20} strokeWidth={1.5}/></a>
-                <a href="#" className="aspect-square border border-white/20 flex items-center justify-center hover:bg-white hover:text-black transition duration-500 hover:scale-105"><Youtube size={20} strokeWidth={1.5}/></a>
-                <a href="#" className="aspect-square border border-white/20 flex items-center justify-center hover:bg-white hover:text-black transition duration-500 hover:scale-105"><Music size={20} strokeWidth={1.5}/></a>
+                {artist.socialLinks?.instagram?.isActive && (
+                    <a href={artist.socialLinks.instagram.url} target="_blank" className="aspect-square border border-white/20 flex items-center justify-center hover:bg-white hover:text-black transition duration-500 hover:scale-105"><Instagram size={20} strokeWidth={1.5}/></a>
+                )}
+                {artist.socialLinks?.twitter?.isActive && (
+                    <a href={artist.socialLinks.twitter.url} target="_blank" className="aspect-square border border-white/20 flex items-center justify-center hover:bg-white hover:text-black transition duration-500 hover:scale-105"><Twitter size={20} strokeWidth={1.5}/></a>
+                )}
+                {artist.socialLinks?.youtube?.isActive && (
+                    <a href={artist.socialLinks.youtube.url} target="_blank" className="aspect-square border border-white/20 flex items-center justify-center hover:bg-white hover:text-black transition duration-500 hover:scale-105"><Youtube size={20} strokeWidth={1.5}/></a>
+                )}
+                {artist.socialLinks?.facebook?.isActive && (
+                    <a href={artist.socialLinks.facebook.url} target="_blank" className="aspect-square border border-white/20 flex items-center justify-center hover:bg-white hover:text-black transition duration-500 hover:scale-105"><Facebook size={20} strokeWidth={1.5}/></a>
+                )}
+                 {artist.socialLinks?.discord?.isActive && (
+                    <a href={artist.socialLinks.discord.url} target="_blank" className="aspect-square border border-white/20 flex items-center justify-center hover:bg-white hover:text-black transition duration-500 hover:scale-105"><MessageCircle size={20} strokeWidth={1.5}/></a>
+                )}
              </div>
           </section>
         </div>
@@ -419,19 +436,19 @@ const ArtistLandingPage: React.FC<Props> = ({ previewData }) => {
                      <div className="bg-black border border-white/10 p-6 flex flex-col justify-between h-32">
                          <span className="text-[10px] text-gray-500 uppercase tracking-widest flex items-center gap-2">
                              <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
-                             Live Users
+                             Live Users (10m)
                          </span>
-                         <span className="text-3xl font-display font-bold text-white">{onlineUsers}</span>
+                         <span className="text-3xl font-display font-bold text-white">{activeUsers}</span>
                      </div>
                      <div className="bg-black border border-white/10 p-6 flex flex-col justify-between">
                          <span className="text-[10px] text-gray-500 uppercase tracking-widest mb-2">Active Regions</span>
                          <div className="flex flex-wrap gap-2">
-                             {artist.visitorCountries && artist.visitorCountries.length > 0 ? (
-                                 artist.visitorCountries.map((country, idx) => (
+                             {activeCountries.length > 0 ? (
+                                 activeCountries.slice(0, 5).map((country, idx) => (
                                      <span key={idx} className="text-[10px] border border-white/20 px-2 py-1 text-gray-400 uppercase">{country}</span>
                                  ))
                              ) : (
-                                 <span className="text-[10px] text-gray-600">Calculating demographics...</span>
+                                 <span className="text-[10px] text-gray-600">Global</span>
                              )}
                          </div>
                      </div>

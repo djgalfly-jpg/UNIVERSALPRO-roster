@@ -1,7 +1,7 @@
 import { Artist, WallItem } from '../types';
 import pool from './db';
 
-// Initial Mock Data - Latin Grammy Theme (Used for Seeding)
+// Initial Mock Data - Latin Grammy Theme (Used for Seeding Artists ONLY)
 const INITIAL_ARTISTS: Artist[] = [
   {
     id: '1',
@@ -19,49 +19,15 @@ const INITIAL_ARTISTS: Artist[] = [
     bookUrl: "",
     isPublic: true,
     generatedLink: '/artist/rosalia',
-    galleryUrls: [
-        "https://picsum.photos/800/600?random=1",
-        "https://picsum.photos/800/600?random=2",
-        "https://picsum.photos/800/600?random=3"
-    ],
-    visitCount: 1245092,
-    visitorCountries: ['Spain', 'USA', 'Mexico', 'Colombia', 'Argentina'],
-    status: 'active'
-  },
-  {
-    id: '2',
-    slug: 'bad-bunny',
-    name: "Bad Bunny",
-    bio: "Global icon dominating the charts. The face of modern Reggaeton.",
-    photoUrl: "https://picsum.photos/800/800?random=103",
-    genre: "Trap / Reggaeton",
-    stats: { spotifyListeners: 80000000, youtubeSubscribers: 45000000, instagramFollowers: 46000000, tiktokFollowers: 35000000 },
-    topSongs: [
-        { id: 's3', title: "Monaco", streams: 1200000000, coverUrl: "https://picsum.photos/400/400?random=104" }
-    ],
-    youtubeVideoId: "UNZqm3dxdRE",
-    spotifyArtistId: "4q3ewBCX7sLwd24euuV69X",
-    bookUrl: "",
-    isPublic: true,
-    generatedLink: '/artist/bad-bunny',
     galleryUrls: [],
-    visitCount: 5430210,
-    visitorCountries: ['Puerto Rico', 'USA', 'Spain', 'Chile'],
-    status: 'active'
+    visitCount: 1245092,
+    visitorCountries: ['Spain', 'USA', 'Mexico'],
+    status: 'active',
+    socialLinks: {
+        instagram: { url: 'https://instagram.com', isActive: true },
+        youtube: { url: 'https://youtube.com', isActive: true }
+    }
   }
-];
-
-const INITIAL_WALL: WallItem[] = [
-    { id: 'w1', type: 'album', title: 'MOTOMAMI', subtitle: 'Album of the Year', imageUrl: 'https://picsum.photos/400/400?random=102' },
-    { id: 'w2', type: 'artist', title: 'Karol G', subtitle: 'Artist', imageUrl: 'https://picsum.photos/800/800?random=105' },
-    { id: 'w3', type: 'single', title: 'Titi Me Preguntó', subtitle: 'Single', imageUrl: 'https://picsum.photos/400/400?random=104' },
-    { id: 'w4', type: 'artist', title: 'Rauw Alejandro', subtitle: 'Artist', imageUrl: 'https://picsum.photos/800/800?random=106' },
-    { id: 'w5', type: 'album', title: 'Un Verano Sin Ti', subtitle: 'Bad Bunny', imageUrl: 'https://picsum.photos/400/400?random=107' },
-    { id: 'w6', type: 'single', title: 'Provenza', subtitle: 'Karol G', imageUrl: 'https://picsum.photos/400/400?random=108' },
-    { id: 'w7', type: 'album', title: 'Mañana Será Bonito', subtitle: 'Karol G', imageUrl: 'https://picsum.photos/400/400?random=109' },
-    { id: 'w8', type: 'single', title: 'Ojitos Lindos', subtitle: 'Bad Bunny', imageUrl: 'https://picsum.photos/400/400?random=110' },
-    { id: 'w9', type: 'artist', title: 'Shakira', subtitle: 'Legend', imageUrl: 'https://picsum.photos/400/400?random=111' },
-    { id: 'w10', type: 'artist', title: 'Bizarrap', subtitle: 'Producer', imageUrl: 'https://picsum.photos/800/800?random=112' },
 ];
 
 // Initialize Database Schema
@@ -94,6 +60,24 @@ export const initDB = async () => {
                 );
             `);
 
+            // Create Global Settings Table (For Site Lock & SEO)
+            await client.query(`
+                CREATE TABLE IF NOT EXISTS global_settings (
+                    key TEXT PRIMARY KEY,
+                    value TEXT
+                );
+            `);
+            
+            // Create Live Analytics Table
+             await client.query(`
+                CREATE TABLE IF NOT EXISTS analytics_logs (
+                    id SERIAL PRIMARY KEY,
+                    artist_id TEXT,
+                    country TEXT,
+                    timestamp TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                );
+            `);
+
             // Seed Initial Data if Empty
             const artistCount = await client.query('SELECT COUNT(*) FROM artists');
             if (parseInt(artistCount.rows[0].count) === 0) {
@@ -102,17 +86,6 @@ export const initDB = async () => {
                     await client.query(
                         'INSERT INTO artists (id, slug, data) VALUES ($1, $2, $3)',
                         [artist.id, artist.slug, JSON.stringify(artist)]
-                    );
-                }
-            }
-
-            const wallCount = await client.query('SELECT COUNT(*) FROM wall_items');
-            if (parseInt(wallCount.rows[0].count) === 0) {
-                console.log("Seeding Initial Wall...");
-                for (const item of INITIAL_WALL) {
-                    await client.query(
-                        'INSERT INTO wall_items (id, data) VALUES ($1, $2)',
-                        [item.id, JSON.stringify(item)]
                     );
                 }
             }
@@ -139,6 +112,83 @@ export const checkDbConnection = async (): Promise<boolean> => {
     } catch (e) {
         console.error("DB Check failed", e);
         return false;
+    }
+}
+
+// --- Global Settings (Lock & SEO) ---
+
+export const getSiteLockStatus = async (): Promise<boolean> => {
+    try {
+        const result = await pool.query("SELECT value FROM global_settings WHERE key = 'site_lock'");
+        return result.rows[0]?.value === 'true';
+    } catch (e) {
+        return false;
+    }
+};
+
+export const setSiteLockStatus = async (isLocked: boolean): Promise<void> => {
+    try {
+        const val = isLocked ? 'true' : 'false';
+        await pool.query(
+            "INSERT INTO global_settings (key, value) VALUES ('site_lock', $1) ON CONFLICT (key) DO UPDATE SET value = $1", 
+            [val]
+        );
+    } catch (e) {
+        console.error(e);
+    }
+};
+
+export interface SEOSettings {
+    title: string;
+    description: string;
+    keywords: string;
+    lastUpdated: string;
+}
+
+export const getSEOSettings = async (): Promise<SEOSettings | null> => {
+    try {
+        const result = await pool.query("SELECT value FROM global_settings WHERE key = 'seo_config'");
+        if (result.rows[0]?.value) {
+            return JSON.parse(result.rows[0].value);
+        }
+        return null;
+    } catch (e) {
+        return null;
+    }
+}
+
+export const saveSEOSettings = async (settings: SEOSettings): Promise<void> => {
+    try {
+        await pool.query(
+            "INSERT INTO global_settings (key, value) VALUES ('seo_config', $1) ON CONFLICT (key) DO UPDATE SET value = $1",
+            [JSON.stringify(settings)]
+        );
+    } catch (e) {
+        console.error("Error saving SEO", e);
+    }
+}
+
+// --- Analytics ---
+
+export const getLiveAnalytics = async (): Promise<{activeUsers: number, countries: string[]}> => {
+    try {
+        // Count logs from last 10 minutes to simulate "Live" users
+        const result = await pool.query(`
+            SELECT country, COUNT(*) as count 
+            FROM analytics_logs 
+            WHERE timestamp > NOW() - INTERVAL '10 minutes'
+            GROUP BY country
+        `);
+        
+        const countries = result.rows.map(r => r.country).filter(c => c);
+        const activeUsers = result.rows.reduce((acc, r) => acc + parseInt(r.count), 0);
+        
+        return { 
+            activeUsers: activeUsers > 0 ? activeUsers : 0, 
+            countries: countries.length > 0 ? countries : ['Global'] 
+        };
+    } catch(e) {
+        return { activeUsers: 0, countries: [] };
     }
 }
 
@@ -202,22 +252,28 @@ export const trackArtistVisit = async (artistId: string): Promise<Artist | null>
 
             const artist = res.rows[0].data as Artist;
             
-            // Logic to update stats
+            // 1. Update total visits
             artist.visitCount = (artist.visitCount || 0) + 1;
             
+            // 2. Determine country (Simulated for this demo, would be IP based in real app)
             const potentialCountries = ['USA', 'Spain', 'Mexico', 'UK', 'France', 'Brazil', 'Japan', 'Germany', 'Argentina', 'Colombia'];
-            if (!artist.visitorCountries) artist.visitorCountries = [];
+            const randomCountry = potentialCountries[Math.floor(Math.random() * potentialCountries.length)];
             
-            if (Math.random() > 0.9) {
-                const randomCountry = potentialCountries[Math.floor(Math.random() * potentialCountries.length)];
-                if (!artist.visitorCountries.includes(randomCountry)) {
-                    artist.visitorCountries.push(randomCountry);
-                }
+            if (!artist.visitorCountries) artist.visitorCountries = [];
+            if (!artist.visitorCountries.includes(randomCountry)) {
+                artist.visitorCountries.push(randomCountry);
             }
 
+            // 3. Save Artist Data
             await client.query(
                 'UPDATE artists SET data = $1 WHERE id = $2',
                 [JSON.stringify(artist), artistId]
+            );
+
+            // 4. Insert into Live Analytics Log
+            await client.query(
+                'INSERT INTO analytics_logs (artist_id, country) VALUES ($1, $2)',
+                [artistId, randomCountry]
             );
             
             return artist;
@@ -234,9 +290,13 @@ export const trackArtistVisit = async (artistId: string): Promise<Artist | null>
 
 export const getWallItems = async (): Promise<WallItem[]> => {
      try {
-         const result = await pool.query('SELECT data FROM wall_items ORDER BY id DESC'); // Naive sort, assuming newer IDs are higher or UUIDs
-         // Actually better to rely on insert order if we had a created_at, but for now just returning all
-         return result.rows.map(r => r.data as WallItem);
+         // CRITICAL FIX: Ensure we get ID from column in case JSON data is corrupted
+         const result = await pool.query('SELECT id, data FROM wall_items ORDER BY id DESC');
+         return result.rows.map(r => {
+             const data = r.data || {};
+             // Merge DB ID on top of data ID to ensure validity for deletion
+             return { ...data, id: r.id } as WallItem;
+         });
      } catch (e) {
          console.error(e);
          return [];
@@ -254,11 +314,38 @@ export const addToWall = async (item: WallItem): Promise<void> => {
     }
 }
 
-export const deleteWallItem = async (id: string): Promise<void> => {
+export const deleteWallItem = async (id: string): Promise<boolean> => {
     try {
         await pool.query('DELETE FROM wall_items WHERE id = $1', [id]);
+        return true;
     } catch (e) {
         console.error("Error deleting wall item:", e);
+        return false;
+    }
+}
+
+export const clearWall = async (): Promise<void> => {
+    try {
+        await pool.query('DELETE FROM wall_items');
+    } catch (e) {
+        console.error("Error clearing wall:", e);
+    }
+}
+
+export const hardResetWall = async (): Promise<boolean> => {
+    try {
+        // DROP and RECREATE the table. This is the "Nuclear Option" to fix all corruption.
+        await pool.query('DROP TABLE IF EXISTS wall_items');
+        await pool.query(`
+            CREATE TABLE IF NOT EXISTS wall_items (
+                id TEXT PRIMARY KEY,
+                data JSONB
+            );
+        `);
+        return true;
+    } catch (e) {
+        console.error("Error resetting wall:", e);
+        return false;
     }
 }
 
@@ -273,26 +360,27 @@ export const convertDropboxLink = (url: string): string => {
 
 // --- Visual Effects ---
 
-export const getVisualEffects = async (): Promise<{ title: string, wall: string }> => {
+export const getVisualEffects = async (): Promise<{ title: string, wall: string, speed: number }> => {
     try {
         const titleRes = await pool.query("SELECT value FROM visual_effects WHERE key = 'title'");
         const wallRes = await pool.query("SELECT value FROM visual_effects WHERE key = 'wall'");
+        const speedRes = await pool.query("SELECT value FROM visual_effects WHERE key = 'wall_speed'");
         
         return {
             title: titleRes.rows[0]?.value || '',
-            wall: wallRes.rows[0]?.value || ''
+            wall: wallRes.rows[0]?.value || '',
+            speed: parseInt(speedRes.rows[0]?.value || '45')
         };
     } catch (e) {
-        return { title: '', wall: '' };
+        return { title: '', wall: '', speed: 45 };
     }
 }
 
-export const saveVisualEffects = async (titleFx: string, wallFx: string): Promise<void> => {
+export const saveVisualEffects = async (titleFx: string, wallFx: string, speed: number): Promise<void> => {
     try {
         await pool.query("INSERT INTO visual_effects (key, value) VALUES ('title', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [titleFx]);
         await pool.query("INSERT INTO visual_effects (key, value) VALUES ('wall', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [wallFx]);
-        
-        // Dispatch event for local reactivity if needed (though DB is source of truth now, a refresh might be needed)
+        await pool.query("INSERT INTO visual_effects (key, value) VALUES ('wall_speed', $1) ON CONFLICT (key) DO UPDATE SET value = $1", [speed.toString()]);
         window.dispatchEvent(new Event('storage_fx_update'));
     } catch (e) {
         console.error(e);
