@@ -1,0 +1,7 @@
+{
+  "name": "Universal Orchard Music Roster",
+  "description": "A dynamic platform for Universal Orchard Music featuring an infinite public wall of albums, an AI-powered admin dashboard for roster management, and generated private landing pages for artists with analytics.",
+  "requestFramePermissions": [
+    "microphone"
+  ]
+}
